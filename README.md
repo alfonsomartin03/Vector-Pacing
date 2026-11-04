@@ -44,6 +44,12 @@ Two independent tools in one local app:
     (plus an optional course `.gpx`).
   * **Detection.** Sustained following within a configurable zone. Lateral separation is used when
     the position accuracy supports it.
+  * **Power screen** (from [RaceGuard](https://github.com/alfonsomartin03/RaceGuard), merged here).
+    Rides with power are checked for sections where the rider held speed on clearly less power than
+    in their own comparable sections. This works with a single ride, and findings are linked with
+    overlapping GPS intervals.
+  * **Command line.** `vector-pacing-review R01.fit R02.fit --course course.gpx` prints a text
+    report (`--json` for the full report).
   * **What it tells apart.** Following is distinguished from overtakes, drop-backs, brief
     encounters, opposite-direction riders, side-by-side riders and nearby separate course sections.
   * **Data quality.** Missing samples, misaligned timestamps, GNSS uncertainty and insufficient
@@ -98,7 +104,8 @@ This runs ruff, mypy, pytest, eslint, tsc, vitest and the production build, the 
 
 ```
 backend/vector_pacing/   course.py · physics.py · athlete.py · simulate.py · optimize.py · api.py
-                         drafting.py · drafting_api.py · fit.py  (potential-drafting check, independent of pacing)
+                         drafting.py · power_screen.py · review.py · fit.py · drafting_api.py · cli.py
+                         (potential-drafting check: GPS following + RaceGuard power screen; independent of pacing)
 backend/vector_pacing/data/   demo_course.gpx · drafting_demo.json  (regenerate with backend/scripts/*.py)
 backend/tests/           pytest: parsing, physics, W′, simulation, optimizer, drafting rules, API
 frontend/src/            React app; drafting UI in src/drafting; vitest tests in src/test
@@ -138,7 +145,8 @@ Details are in [docs/DRAFTING.md](docs/DRAFTING.md#limitations).
 The original concept went further. The following are **not implemented** and are not planned for
 this release:
 
-* FIT file parsing, recorded-ride replay, live telemetry and WebSocket streaming
+* Recorded-ride replay, live telemetry and WebSocket streaming (FIT files are read for the drafting
+  check only, not for pacing)
 * Time-series database storage (PostgreSQL/TimescaleDB)
 * Heart rate, cadence and other sensor channels, and Bluetooth/ANT+, Garmin or smart-trainer integration
 * Real-time pacing recommendations during a ride

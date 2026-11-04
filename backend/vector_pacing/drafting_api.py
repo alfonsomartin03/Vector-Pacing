@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
-from pathlib import PurePath
 from typing import Annotated, Any, Literal
 
 import numpy as np
@@ -12,29 +10,26 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from . import __version__
-from .course import MAX_GPX_BYTES, CourseError, haversine_m, parse_gpx_points
+from .course import MAX_GPX_BYTES
 from .drafting import (
     DISCLAIMER,
     DRAFT_MODEL_VERSION,
     FORMAT_ID,
     ILLUSTRATIVE_PRESETS,
-    MAX_RIDERS,
     DraftingAnalysis,
     DraftingSettings,
     ExemptSection,
-    Scenario,
-    ScenarioError,
     analyze,
     load_demo_scenario,
     parse_scenario,
 )
-from .fit import MAX_FIT_BYTES, read_fit
+from .fit import MAX_FIT_BYTES
+from .review import PowerReview, power_payload, run_fit_review
 
 router = APIRouter(prefix="/api/drafting", tags=["drafting"])
 
 DEMO_EXEMPT_SECTIONS = [{"start_m": 3950.0, "end_m": 4085.0, "label": "Turnaround (illustrative)"}]
 MAX_COURSE_POINTS_OUT = 1500
-COURSE_FROM_TRACK_SPACING_M = 5.0
 
 
 class _Strict(BaseModel):
@@ -96,7 +91,7 @@ def _f(v: float, nd: int = 2) -> float | None:
     return round(float(v), nd) if math.isfinite(float(v)) else None
 
 
-def payload(a: DraftingAnalysis, settings_in: DraftingSettingsIn) -> dict[str, Any]:
+def payload(a: DraftingAnalysis, settings_in: DraftingSettingsIn, power: PowerReview | None = None) -> dict[str, Any]:
     sc, grid = a.scenario, a.grid
     xy = a.course.xy
     stride = max(1, math.ceil(len(xy) / MAX_COURSE_POINTS_OUT))
@@ -139,6 +134,10 @@ def payload(a: DraftingAnalysis, settings_in: DraftingSettingsIn) -> dict[str, A
     enc_counts: dict[str, int] = {}
     for enc in a.encounters:
         enc_counts[enc.type] = enc_counts.get(enc.type, 0) + 1
+    power_screen = power_payload(power, events) if power is not None else None
+    if power is None:
+        for e in events:
+            e["power_anomaly_ids"] = []
     return {
         "meta": {
             "app_version": __version__,
@@ -199,6 +198,7 @@ def payload(a: DraftingAnalysis, settings_in: DraftingSettingsIn) -> dict[str, A
             for e in a.encounters
         ],
         "encounter_counts": enc_counts,
+        "power_screen": power_screen,
     }
 
 
@@ -224,87 +224,6 @@ def analyze_endpoint(req: DraftingRequest) -> dict[str, Any]:
     return payload(analyze(scenario, req.settings.to_domain()), req.settings)
 
 
-def _unique_id(stem: str, seen: set[str]) -> str:
-    base = (stem.strip() or "rider")[:36]
-    rid, n = base, 2
-    while rid in seen:
-        rid, n = f"{base}-{n}", n + 1
-    seen.add(rid)
-    return rid
-
-
-def scenario_from_fit(rider_files: list[tuple[str, bytes]], course_file: tuple[str, bytes] | None) -> Scenario:
-    """Build a scenario from one FIT activity per rider and an optional GPX course line.
-
-    Without a course file the first rider's track (thinned to ~5 m spacing) is used as the course line.
-    """
-    if len(rider_files) < 2:
-        raise ScenarioError("Upload at least two .fit files (one per rider).")
-    if len(rider_files) > MAX_RIDERS:
-        raise ScenarioError(f"At most {MAX_RIDERS} riders are supported.")
-    tracks = []
-    seen: set[str] = set()
-    for fname, data in rider_files:
-        tr = read_fit(data, fname)
-        if len(tr.t) < 2:
-            raise ScenarioError(f"{fname}: fewer than two GPS positions were found; was GPS recording enabled?")
-        tracks.append((_unique_id(PurePath(fname).stem, seen), fname, tr))
-    t0 = min(min(tr.t) for _, _, tr in tracks)
-
-    notes: list[str] = []
-    if course_file is not None:
-        cname, cdata = course_file
-        try:
-            gname, pts, _, _ = parse_gpx_points(cdata)
-        except CourseError as exc:
-            raise ScenarioError(f"{cname}: {exc}") from None
-        course_pts = [[lat, lon] for lat, lon, _ in pts]
-        course_name = (gname or PurePath(cname).stem)[:120]
-        notes.append(f"Course line from {cname}.")
-    else:
-        rid, fname, first = tracks[0]
-        lat, lon = np.array(first.lat), np.array(first.lon)
-        cum = np.concatenate([[0.0], np.cumsum(haversine_m(lat[:-1], lon[:-1], lat[1:], lon[1:]))])
-        bucket = np.floor(cum / COURSE_FROM_TRACK_SPACING_M)
-        keep = np.flatnonzero(np.concatenate([[True], np.diff(bucket) > 0])).tolist()
-        if keep[-1] != len(lat) - 1:
-            keep.append(len(lat) - 1)
-        course_pts = [[float(lat[i]), float(lon[i])] for i in keep]
-        course_name = f"Track of {rid}"
-        notes.append(
-            f"No course .gpx was uploaded, so {fname}'s own track is used as the course line. "
-            "Upload the course .gpx for a neutral reference."
-        )
-
-    riders = []
-    for rid, _, tr in tracks:
-        riders.append(
-            {
-                "id": rid,
-                "label": rid,
-                "samples": {
-                    "t": [t - t0 for t in tr.t],
-                    "lat": tr.lat,
-                    "lon": tr.lon,
-                    "accuracy_m": tr.accuracy_m,
-                },
-            }
-        )
-    doc = {
-        "format": FORMAT_ID,
-        "name": f"{len(tracks)} riders from .fit files",
-        "description": " ".join(notes),
-        "start_time": datetime.fromtimestamp(t0, UTC).isoformat().replace("+00:00", "Z"),
-        "course": {"name": course_name, "points": course_pts},
-        "riders": riders,
-    }
-    scenario = parse_scenario(doc, source=", ".join(f for f, _ in rider_files)[:200])
-    for rider, (_, _, tr) in zip(scenario.riders, tracks, strict=True):
-        if tr.records_without_position:
-            rider.warnings.append(f"{tr.records_without_position} record(s) without a GPS position were ignored.")
-    return scenario
-
-
 @router.post("/analyze-fit")
 async def analyze_fit_endpoint(
     files: Annotated[list[UploadFile], File(description="One .fit activity file per rider")],
@@ -328,5 +247,5 @@ async def analyze_fit_endpoint(
         if not cname.lower().endswith(".gpx"):
             raise HTTPException(422, f'"{cname}": the course must be a .gpx file.')
         course_file = (cname, await course.read(MAX_GPX_BYTES + 1))
-    scenario = scenario_from_fit(riders, course_file)
-    return payload(analyze(scenario, settings_in.to_domain()), settings_in)
+    review = run_fit_review(riders, course_file, settings_in.to_domain())
+    return payload(review.analysis, settings_in, review.power)

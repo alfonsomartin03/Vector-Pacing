@@ -53,5 +53,9 @@ Prerequisite: `make install` once, then `make serve` and open <http://127.0.0.1:
     5 m assumption applies, and the result is **inconclusive**, not a flag. Open *Data-quality
     settings*, set *Assumed accuracy* to 1 m and re-run: now 1 potential drafting. Then upload `A.fit`
     together with `samples/drafting_invalid.fit` to show the validation error.
+    **Power screen.** Upload the three files in `samples/drafting_with_power/`. E001 (R02 behind
+    R01, potential drafting) is linked to P001 in the *Power screen* card: about 269 W against R02's
+    own 367 W reference. Then upload `R02.fit` alone: no GPS check is possible, but the power screen
+    still finds P001.
 14. **Export.** Click **Export JSON (full)** and **Export CSV (intervals)**. Both include the
     settings, the illustrative note, per-interval limitations and the disclaimer.

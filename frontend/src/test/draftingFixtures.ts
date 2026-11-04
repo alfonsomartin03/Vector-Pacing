@@ -62,6 +62,7 @@ const ev = (id: string, classification: DraftEvent['classification'], follower: 
   course_end_m: 1600,
   limitations: ['Combined gap uncertainty ≈ ±3.0 m (1σ) against a 10 m zone.'],
   series,
+  power_anomaly_ids: [],
 });
 
 export const draftingResponse: DraftingResponse = {
@@ -107,4 +108,29 @@ export const draftingResponse: DraftingResponse = {
     { rider_a: 'R01', rider_b: 'R03', type: 'opposite_direction', start_s: 300, end_s: 300, duration_s: 1, min_distance_m: 2.1, median_course_gap_m: 1 },
   ],
   encounter_counts: { opposite_direction: 1 },
+  power_screen: null,
+};
+
+/** A .fit upload response: R02's GPS interval E001 overlaps power anomaly P001. */
+export const fitResponse: DraftingResponse = {
+  ...draftingResponse,
+  scenario: { ...draftingResponse.scenario, name: '3 riders from .fit files', illustrative: false, source: 'R01.fit, R02.fit, R03.fit' },
+  events: [{ ...ev('E001', 'potential_drafting', 'R02', 'R01'), power_anomaly_ids: ['P001'] }, ev('E002', 'overtake', 'R03', 'R02')],
+  power_screen: {
+    version: 'raceguard-matched-sections-1',
+    note: 'Within-rider power screen (from RaceGuard).',
+    riders: [
+      { id: 'R01', has_power: true, speed_from_gps: false, anomaly_count: 0, warnings: [] },
+      { id: 'R02', has_power: true, speed_from_gps: false, anomaly_count: 1, warnings: [] },
+      { id: 'R03', has_power: false, speed_from_gps: false, anomaly_count: 0, warnings: ['No power recorded; the power screen was skipped.'] },
+    ],
+    anomalies: [
+      {
+        id: 'P001', rider: 'R02', start_s: 105, end_s: 155, duration_s: 51, score: 0.8, power_score: 0.76, duration_score: 1,
+        average_speed_kmh: 43.2, average_power_w: 269, reference_power_w: 367, deficit_w: 98, peer_count: 146,
+        speed_normalised: false, heading_deg: 90, lat: 47, lon: 8.05, distance_m: 1300,
+        notes: ['Power was lower than 146 comparable sections from this rider\'s activity.'], gps_event_ids: ['E001'],
+      },
+    ],
+  },
 };

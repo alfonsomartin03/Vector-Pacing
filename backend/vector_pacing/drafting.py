@@ -198,7 +198,7 @@ def _rows_from_samples(samples: Any, rid: str) -> list[dict[str, Any]]:
     raise ScenarioError(f"Rider {rid}: 'samples' must be a list of objects or an object of arrays.")
 
 
-def parse_scenario(doc: Any, source: str = "upload") -> Scenario:
+def parse_scenario(doc: Any, source: str = "upload", min_riders: int = 2) -> Scenario:
     """Validate a ``vector-pacing-riders/1`` document. Raises :class:`ScenarioError`."""
     if not isinstance(doc, dict):
         raise ScenarioError("The document must be a JSON object.")
@@ -219,8 +219,8 @@ def parse_scenario(doc: Any, source: str = "upload") -> Scenario:
         raise ScenarioError("The course needs at least two points.")
 
     riders_doc = doc.get("riders")
-    if not isinstance(riders_doc, list) or len(riders_doc) < 2:
-        raise ScenarioError("'riders' must list at least two riders.")
+    if not isinstance(riders_doc, list) or len(riders_doc) < min_riders:
+        raise ScenarioError("'riders' must list at least two riders." if min_riders == 2 else "No riders were given.")
     if len(riders_doc) > MAX_RIDERS:
         raise ScenarioError(f"At most {MAX_RIDERS} riders are supported.")
 
