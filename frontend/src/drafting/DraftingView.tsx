@@ -21,13 +21,13 @@ type Run =
 
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
 const msg = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : 'Unexpected error.');
-const scenarioId = (s: ScenarioRef | null, name: string) => (s ? (s.kind === 'demo' ? 'demo' : `upload:${name}`) : null);
+const scenarioId = (s: ScenarioRef | null) =>
+  s ? (s.kind === 'demo' ? 'demo' : `upload:${[...s.riders, ...(s.course ? [s.course] : [])].map((f) => `${f.name}:${f.size}:${f.lastModified}`).join('|')}`) : null;
 
 export function DraftingView() {
   const [presets, setPresets] = useState<PresetsResponse | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<ScenarioRef | null>(null);
-  const [scenarioName, setScenarioName] = useState('');
   const [form, setForm] = useState<DForm | null>(null);
   const [presetKey, setPresetKey] = useState('custom');
   const [run, setRun] = useState<Run>({ status: 'idle' });
@@ -62,19 +62,19 @@ export function DraftingView() {
     () => (form ? validateDraft(form) : { errors: {}, settings: null }),
     [form],
   );
-  const currentKey = settings && scenario ? JSON.stringify({ s: scenarioId(scenario, scenarioName), settings }) : null;
+  const currentKey = settings && scenario ? JSON.stringify({ s: scenarioId(scenario), settings }) : null;
   const result = last?.data ?? null;
   const stale = last !== null && last.key !== currentKey;
   const running = run.status === 'running';
 
-  const execute = useCallback(async (sc: ScenarioRef, name: string, st: DraftingSettings) => {
+  const execute = useCallback(async (sc: ScenarioRef, st: DraftingSettings) => {
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setRun({ status: 'running' });
     try {
       const data = await analyzeDrafting(sc, st, ctrl.signal);
-      const done = { status: 'done' as const, key: JSON.stringify({ s: scenarioId(sc, name), settings: st }), data };
+      const done = { status: 'done' as const, key: JSON.stringify({ s: scenarioId(sc), settings: st }), data };
       setRun(done);
       setLast(done);
       const first = data.events.find((e) => e.flagged) ?? data.events.find((e) => e.classification === 'inconclusive');
@@ -90,28 +90,27 @@ export function DraftingView() {
     const nextForm = { ...form, exempt: form.exempt.trim() ? form.exempt : formatExempt(presets.demo_exempt_sections) };
     setForm(nextForm);
     setScenario({ kind: 'demo' });
-    setScenarioName('Bundled demo');
     setUploadError(null);
     setLast(null);
     const v = validateDraft(nextForm);
-    if (v.settings) void execute({ kind: 'demo' }, 'Bundled demo', v.settings);
+    if (v.settings) void execute({ kind: 'demo' }, v.settings);
   };
 
-  const onFile = async (file: File) => {
+  const onFiles = (files: File[]) => {
     setUploadError(null);
-    if (!/\.json$/i.test(file.name)) return setUploadError(`"${file.name}" is not a .json file.`);
-    if (file.size > MAX_UPLOAD_BYTES) return setUploadError(`"${file.name}" is larger than 20 MB.`);
-    let document: unknown;
-    try {
-      document = JSON.parse(await file.text());
-    } catch {
-      return setUploadError(`"${file.name}" is not valid JSON.`);
-    }
-    const sc: ScenarioRef = { kind: 'upload', document, filename: file.name };
+    const riders = files.filter((f) => /\.fit$/i.test(f.name));
+    const courses = files.filter((f) => /\.gpx$/i.test(f.name));
+    const other = files.filter((f) => !riders.includes(f) && !courses.includes(f));
+    if (other.length) return setUploadError(`"${other[0]!.name}" is not a .fit or .gpx file.`);
+    if (riders.length < 2) return setUploadError('Select at least two .fit files (one per rider).');
+    if (courses.length > 1) return setUploadError('Select at most one .gpx course file.');
+    const big = files.find((f) => f.size > MAX_UPLOAD_BYTES);
+    if (big) return setUploadError(`"${big.name}" is larger than 20 MB.`);
+    const course = courses[0] ?? null;
+    const sc: ScenarioRef = { kind: 'upload', riders, course };
     setScenario(sc);
-    setScenarioName(file.name);
     setLast(null);
-    if (settings) void execute(sc, file.name, settings);
+    if (settings) void execute(sc, settings);
   };
 
   const applyPreset = (key: string) => {
@@ -127,7 +126,6 @@ export function DraftingView() {
   const reset = () => {
     abortRef.current?.abort();
     setScenario(null);
-    setScenarioName('');
     setLast(null);
     setRun({ status: 'idle' });
     setSelectedId(null);
@@ -183,19 +181,20 @@ export function DraftingView() {
           </button>
           <span className="or">or</span>
           <label className={`btn btn-secondary file-btn${running ? ' is-disabled' : ''}`}>
-            Upload rider data (JSON)…
+            Upload rides (.fit)…
             <input
               ref={fileRef}
               type="file"
-              accept=".json,application/json"
+              multiple
+              accept=".fit,.gpx"
               className="visually-hidden-input"
               disabled={running}
               onClick={(e) => {
                 e.currentTarget.value = '';
               }}
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void onFile(f);
+                const fs = Array.from(e.target.files ?? []);
+                if (fs.length) onFiles(fs);
               }}
             />
           </label>
@@ -206,14 +205,15 @@ export function DraftingView() {
           )}
         </div>
         <p className="help">
-          Import format <code>vector-pacing-riders/1</code>: a course line plus timestamped positions per rider (see
-          docs/DRAFTING.md). Live tracking integrations are not supported.
+          Select one <code>.fit</code> activity per rider (as recorded by the head unit or exported from Garmin
+          Connect, Strava, Wahoo…), plus optionally the course <code>.gpx</code>. Without a course file the first
+          rider&apos;s track is used as the course line. See docs/DRAFTING.md.
         </p>
         {uploadError && (
           <div className="alert alert-error" role="alert">
             <p>{uploadError}</p>
             <button type="button" className="btn btn-small" onClick={() => fileRef.current?.click()}>
-              Choose another file
+              Choose other files
             </button>
           </div>
         )}
@@ -326,7 +326,7 @@ export function DraftingView() {
           <section className="panel results-panel" aria-labelledby="draft-results-h">
             <h2 id="draft-results-h">3. Potential drafting review</h2>
             <div className="run-bar">
-              <button type="button" className="btn btn-primary" disabled={!settings || running} onClick={() => settings && void execute(scenario, scenarioName, settings)}>
+              <button type="button" className="btn btn-primary" disabled={!settings || running} onClick={() => settings && void execute(scenario, settings)}>
                 {result ? 'Re-run analysis' : 'Run analysis'}
               </button>
               {running && (
@@ -347,12 +347,12 @@ export function DraftingView() {
                 <div className="alert alert-error" role="alert">
                   <p>Analysis failed: {run.message}</p>
                   <div className="alert-actions">
-                    <button type="button" className="btn btn-small" disabled={!settings} onClick={() => settings && void execute(scenario, scenarioName, settings)}>
+                    <button type="button" className="btn btn-small" disabled={!settings} onClick={() => settings && void execute(scenario, settings)}>
                       Retry
                     </button>
                     {scenario.kind === 'upload' && (
                       <button type="button" className="btn btn-small" onClick={() => fileRef.current?.click()}>
-                        Choose another file
+                        Choose other files
                       </button>
                     )}
                   </div>

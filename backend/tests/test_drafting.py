@@ -18,6 +18,7 @@ from vector_pacing.drafting import (
     load_demo_scenario,
     parse_scenario,
 )
+from vector_pacing.drafting_api import scenario_from_fit
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 M = 111_195.0
@@ -132,11 +133,22 @@ def test_row_and_columnar_forms_are_equivalent_and_cleaned():
     assert any("without a position" in w for w in fa.warnings)
 
 
-def test_iso_times_and_missing_accuracy():
-    sc = parse_scenario(json.loads((SAMPLES / "drafting_two_riders.json").read_text()))
+def fit_files(course: bool = True) -> list[tuple[str, tuple[str, bytes]]]:
+    d = SAMPLES / "drafting_two_riders"
+    out = [("files", (n, (d / n).read_bytes())) for n in ("A.fit", "B.fit")]
+    if course:
+        out.append(("course", ("course.gpx", (d / "course.gpx").read_bytes())))
+    return out
+
+
+def test_fit_sample_times_and_missing_accuracy():
+    files = [(name, data) for key, (name, data) in fit_files(course=False)]
+    sc = scenario_from_fit(files, None)
     assert sc.start_time == "2026-07-01T09:00:00Z"
+    assert [r.id for r in sc.riders] == ["A", "B"]
     assert sc.riders[0].t[0] == 0.0
     assert not sc.riders[0].accuracy_reported
+    assert "track is used as the course line" in sc.description
 
 
 # ---------------------------------------------------------------- rule boundaries
@@ -386,18 +398,40 @@ def test_api_presets_and_demo():
     assert len(body["scenario"]["riders"]) == 12
 
 
-def test_api_upload_sample_and_settings_change():
-    document = json.loads((SAMPLES / "drafting_two_riders.json").read_text())
-    base = {"scenario": {"kind": "upload", "document": document, "filename": "two.json"}}
-    r = client.post("/api/drafting/analyze", json=base).json()
-    # No accuracy reported → the assumed 5 m applies → too uncertain for a 10 m zone.
+def test_api_fit_upload_and_settings_change():
+    def run(settings: dict | None = None, course: bool = True) -> dict:
+        data = {"settings": json.dumps(settings or {})}
+        r = client.post("/api/drafting/analyze-fit", files=fit_files(course), data=data)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    r = run()
+    # No accuracy recorded → the assumed 5 m applies → too uncertain for a 10 m zone.
     assert r["counts"] == {"inconclusive": 1}
+    assert r["scenario"]["course"]["name"] == "Straight 3 km"
     assert r["scenario"]["riders"][0]["accuracy_reported"] is False
     assert any("Accuracy not reported" in w for w in r["scenario"]["riders"][0]["warnings"])
-    precise = {**base, "settings": {"assumed_accuracy_m": 1.0}}
-    assert client.post("/api/drafting/analyze", json=precise).json()["counts"] == {"potential_drafting": 1}
-    short = {**base, "settings": {"assumed_accuracy_m": 1.0, "zone_length_m": 4}}
-    assert client.post("/api/drafting/analyze", json=short).json()["counts"] == {}
+    assert run(course=False)["counts"] == {"inconclusive": 1}
+    assert run({"assumed_accuracy_m": 1.0})["counts"] == {"potential_drafting": 1}
+    assert run({"assumed_accuracy_m": 1.0, "zone_length_m": 4})["counts"] == {}
+
+
+@pytest.mark.parametrize(
+    ("files", "data", "fragment"),
+    [
+        ([("files", ("A.fit", b""))], {}, "at least two .fit files"),
+        ([("files", ("A.fit", b"x")), ("files", ("B.json", b"{}"))], {}, "is not a .fit file"),
+        (None, {"settings": '{"zone_length_m": 0}'}, "settings.zone_length_m"),
+        ("invalid", {}, "truncated"),
+    ],
+)
+def test_api_fit_upload_errors(files, data, fragment):
+    if files is None:
+        files = fit_files()
+    elif files == "invalid":
+        files = [*fit_files()[:1], ("files", ("bad.fit", (SAMPLES / "drafting_invalid.fit").read_bytes()))]
+    r = client.post("/api/drafting/analyze-fit", files=files, data=data)
+    assert r.status_code == 422 and fragment in r.json()["detail"]
 
 
 @pytest.mark.parametrize(
@@ -415,6 +449,6 @@ def test_api_validation(payload):
 
 
 def test_api_invalid_document():
-    document = json.loads((SAMPLES / "drafting_invalid.json").read_text())
+    document = {"format": "vector-pacing-riders/1", "course": {"points": [[47, 8]]}, "riders": []}
     r = client.post("/api/drafting/analyze", json={"scenario": {"kind": "upload", "document": document}})
     assert r.status_code == 422 and r.json()["kind"] == "scenario_error"

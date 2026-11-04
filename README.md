@@ -40,8 +40,8 @@ Two independent tools in one local app:
 * **Export.** Full JSON with inputs, units, versions, summaries, segments and per-step series, plus
   a per-step CSV that compares the two plans.
 * **Drafting check** (separate from pacing):
-  * **Data.** A bundled deterministic 12-rider ITT scenario, or upload of the documented
-    `vector-pacing-riders/1` JSON format.
+  * **Data.** A bundled deterministic 12-rider ITT scenario, or upload of one `.fit` ride per rider
+    (plus an optional course `.gpx`).
   * **Detection.** Sustained following within a configurable zone. Lateral separation is used when
     the position accuracy supports it.
   * **What it tells apart.** Following is distinguished from overtakes, drop-backs, brief
@@ -98,11 +98,11 @@ This runs ruff, mypy, pytest, eslint, tsc, vitest and the production build, the 
 
 ```
 backend/vector_pacing/   course.py · physics.py · athlete.py · simulate.py · optimize.py · api.py
-                         drafting.py · drafting_api.py  (potential-drafting check, independent of pacing)
+                         drafting.py · drafting_api.py · fit.py  (potential-drafting check, independent of pacing)
 backend/vector_pacing/data/   demo_course.gpx · drafting_demo.json  (regenerate with backend/scripts/*.py)
 backend/tests/           pytest: parsing, physics, W′, simulation, optimizer, drafting rules, API
 frontend/src/            React app; drafting UI in src/drafting; vitest tests in src/test
-samples/                 GPX and rider-position files for upload testing (incl. deliberately invalid ones)
+samples/                 GPX and .fit files for upload testing (incl. deliberately invalid ones)
 docs/                    MODEL.md · DRAFTING.md · ARCHITECTURE.md · DEMO.md · RELEASE_CHECKLIST.md
 ```
 

@@ -46,48 +46,37 @@ each one must record its source document and effective date.
 | Smoothing window | 5 s | Rolling median applied to positions. |
 | Analysis step | 1 s | Common time grid. |
 
-## Import format `vector-pacing-riders/1`
+## Import: `.fit` rides
 
-A single JSON document with a course line and timestamped positions for each rider. File uploads are
-limited to 20 MB, 200 riders, 500 000 samples and 24 h per rider. Live tracking integrations are not
-supported.
+Upload **one `.fit` activity file per rider** — the file the head unit records, or the "original
+file" export from Garmin Connect, Strava, Wahoo, etc. Optionally add **one `.gpx` course file**; it
+provides the course line every rider is projected onto. Without it, the first rider's own track
+(thinned to ~5 m spacing) is used as the course line, and the scenario description says so. A neutral
+course file is better: a rider's track carries that rider's GNSS error.
 
-```json
-{
-  "format": "vector-pacing-riders/1",
-  "name": "My event, wave 2",
-  "description": "optional",
-  "illustrative": false,
-  "start_time": "2026-06-14T08:00:00Z",
-  "course": { "name": "optional", "points": [[44.1, 5.2], [44.1001, 5.2004]] },
-  "riders": [
-    {
-      "id": "R01",
-      "label": "optional display name",
-      "samples": [
-        { "t": 0.0, "lat": 44.1, "lon": 5.2, "accuracy_m": 1.5 },
-        { "t": 1.0, "lat": 44.10001, "lon": 5.20013, "accuracy_m": 1.5 }
-      ]
-    }
-  ]
-}
-```
+* From each FIT file, `record` messages with `timestamp`, `position_lat` and `position_long` are read;
+  `gps_accuracy` (metres) is used as the 1-σ horizontal accuracy where the device records it. Where it
+  is missing, the *assumed accuracy* setting is used and the rider is marked "accuracy not reported".
+  Most consumer devices do not record it.
+* Records without a GPS fix (e.g. indoor sections, tunnels) are skipped and counted as a warning.
+* Rider ids come from the file names (`R01.fit` → `R01`); duplicates get a `-2`, `-3`… suffix.
+* FIT timestamps are absolute UTC, so riders are synchronised by clock. Head-unit clocks are GPS-
+  synchronised; the *timestamp tolerance* setting covers residual misalignment.
+* The FIT container is decoded by a small built-in reader (`backend/vector_pacing/fit.py`): normal and
+  compressed-timestamp headers, developer fields, either byte order and chained files are supported,
+  and the file checksum is verified. Corrupted or truncated files are rejected with a message.
+* Limits: 20 MB per file, 2–200 riders, 500 000 positions in total, 24 h per rider. Live tracking
+  integrations are not supported.
 
-* `course.points`: `[lat, lon]` pairs in riding order (WGS-84 degrees). At least 2 points.
-* Time: either `t` (seconds, any common origin) **or** `time` (ISO 8601; `Z`/offset or UTC assumed),
-  used consistently in the whole document. `start_time` (optional) is shown as clock time for `t = 0`.
-* `accuracy_m`: optional 1-σ horizontal position error in metres. Where it is missing, the
-  *assumed accuracy* setting is used, and the rider is marked "accuracy not reported".
-* `samples` may be a list of objects (row form) or an object of equal-length arrays (columnar form:
-  `{"t": [...], "lat": [...], "lon": [...], "accuracy_m": [...]}`).
-* Samples with `null` lat/lon are ignored with a warning. Unsorted samples are sorted, and
-  duplicate timestamps are dropped. Both are reported in the data-quality table.
-* At least two riders, each with at least two positioned samples. Rider ids must be unique.
+Example: [`samples/drafting_two_riders/`](../samples/drafting_two_riders/) (`A.fit`, `B.fit`,
+`course.gpx`; no accuracy recorded). `samples/drafting_invalid.fit` is a truncated file. Regenerate
+both with `backend/scripts/generate_fit_samples.py`.
 
-Examples: [`samples/drafting_two_riders.json`](../samples/drafting_two_riders.json) (row form, ISO
-times, no accuracy) and the bundled scenario
-[`backend/vector_pacing/data/drafting_demo.json`](../backend/vector_pacing/data/drafting_demo.json)
-(columnar form).
+API: `POST /api/drafting/analyze-fit` (multipart: repeated `files`, optional `course`, `settings` as a
+JSON string). Internally the files are converted to the `vector-pacing-riders/1` structure that the
+bundled demo scenario
+([`backend/vector_pacing/data/drafting_demo.json`](../backend/vector_pacing/data/drafting_demo.json))
+uses; `POST /api/drafting/analyze` still accepts that structure for programmatic use.
 
 ## Method
 

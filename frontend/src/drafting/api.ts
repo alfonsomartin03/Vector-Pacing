@@ -33,10 +33,18 @@ export async function fetchPresets(signal?: AbortSignal): Promise<PresetsRespons
   return p;
 }
 
-export const analyzeDrafting = (scenario: ScenarioRef, settings: DraftingSettings, signal?: AbortSignal) =>
-  call<DraftingResponse>('/api/drafting/analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario, settings }),
-    signal,
-  });
+export function analyzeDrafting(scenario: ScenarioRef, settings: DraftingSettings, signal?: AbortSignal) {
+  if (scenario.kind === 'demo') {
+    return call<DraftingResponse>('/api/drafting/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario, settings }),
+      signal,
+    });
+  }
+  const form = new FormData();
+  for (const f of scenario.riders) form.append('files', f, f.name);
+  if (scenario.course) form.append('course', scenario.course, scenario.course.name);
+  form.append('settings', JSON.stringify(settings));
+  return call<DraftingResponse>('/api/drafting/analyze-fit', { method: 'POST', body: form, signal });
+}

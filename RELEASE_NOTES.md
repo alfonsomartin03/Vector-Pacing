@@ -1,5 +1,13 @@
 # Release notes
 
+## Unreleased
+
+* **Drafting check: `.fit` uploads.** Upload one `.fit` activity per rider (plus an optional course
+  `.gpx`) instead of the `vector-pacing-riders/1` JSON document. FIT files are decoded by a built-in
+  reader (no new dependency); `gps_accuracy` is used where recorded. The JSON structure remains
+  available via `POST /api/drafting/analyze` for programmatic use. Samples are now
+  `samples/drafting_two_riders/*.fit` + `course.gpx` and `samples/drafting_invalid.fit`.
+
 ## v1.0.0 — demonstration release (2026-11-03)
 
 First and final planned release of Vector Pacing as a local demonstration. Scope is intentionally
@@ -8,7 +16,7 @@ closed at the workflow below; ideas beyond it are listed under "Deferred ideas" 
 **Workflows:**
 * **Pacing:** open the app → load the bundled course or upload GPX → configure the rider → simulate
   a constant-power baseline → optimize pacing → compare → export.
-* **Drafting check:** load the bundled multi-rider scenario or upload rider positions → adjust the
+* **Drafting check:** load the bundled multi-rider scenario or upload one `.fit` ride per rider → adjust the
   detection settings → inspect potential-drafting intervals → export the findings.
 
 ### Included

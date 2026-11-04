@@ -139,8 +139,10 @@ def haversine_m(lat1: np.ndarray, lon1: np.ndarray, lat2: np.ndarray, lon2: np.n
     return np.asarray(2 * EARTH_RADIUS_M * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0))))
 
 
-def parse_gpx(data: bytes | str, source: str = "upload") -> Course:
-    """Parse GPX bytes/text into a :class:`Course`. Raises :class:`CourseError`."""
+def parse_gpx_points(
+    data: bytes | str,
+) -> tuple[str | None, list[tuple[float, float, float | None]], list[str], str]:
+    """Read GPX track (or route) points: ``(name, [(lat, lon, ele)], warnings, content_hash)``."""
     raw = data.encode("utf-8") if isinstance(data, str) else data
     if len(raw) == 0:
         raise CourseError("The file is empty.")
@@ -186,11 +188,17 @@ def parse_gpx(data: bytes | str, source: str = "upload") -> Course:
     if len(elements) > MAX_POINTS:
         raise CourseError(f"The course has more than {MAX_POINTS:,} points.")
     parsed = [_parse_point(p, i) for i, p in enumerate(elements)]
+    return name, parsed, warnings, hashlib.sha256(raw).hexdigest()[:16]
+
+
+def parse_gpx(data: bytes | str, source: str = "upload") -> Course:
+    """Parse GPX bytes/text into a :class:`Course`. Raises :class:`CourseError`."""
+    name, parsed, warnings, content_hash = parse_gpx_points(data)
     return build_course(
         parsed,
         name=(name or "Uploaded course")[:120],
         source=source,
-        content_hash=hashlib.sha256(raw).hexdigest()[:16],
+        content_hash=content_hash,
         warnings=warnings,
     )
 

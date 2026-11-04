@@ -48,9 +48,10 @@ Prerequisite: `make install` once, then `make serve` and open <http://127.0.0.1:
 12. **Adjust rules.** Choose the preset **Illustrative — long zone (15 m / 30 s)**. Results go stale
     and export is disabled. Click **Re-run analysis**: inconclusive drops to 3, and R02 → R01 is still
     the only flag.
-13. **Upload.** Choose `samples/drafting_two_riders.json`. No accuracy is reported, so the 5 m
-    assumption applies, and the result is **inconclusive**, not a flag. Open *Data-quality settings*,
-    set *Assumed accuracy* to 1 m and re-run: now 1 potential drafting. Then upload
-    `samples/drafting_invalid.json` to show the validation error.
+13. **Upload.** Click **Upload rides (.fit)…** and select all three files in
+    `samples/drafting_two_riders/` (`A.fit`, `B.fit`, `course.gpx`). No accuracy is recorded, so the
+    5 m assumption applies, and the result is **inconclusive**, not a flag. Open *Data-quality
+    settings*, set *Assumed accuracy* to 1 m and re-run: now 1 potential drafting. Then upload `A.fit`
+    together with `samples/drafting_invalid.fit` to show the validation error.
 14. **Export.** Click **Export JSON (full)** and **Export CSV (intervals)**. Both include the
     settings, the illustrative note, per-interval limitations and the disclaimer.

@@ -138,4 +138,5 @@ export interface DraftingResponse {
   encounter_counts: Partial<Record<EncounterType, number>>;
 }
 
-export type ScenarioRef = { kind: 'demo' } | { kind: 'upload'; document: unknown; filename: string };
+/** Uploaded rides: one .fit activity per rider, plus an optional course line (.gpx). */
+export type ScenarioRef = { kind: 'demo' } | { kind: 'upload'; riders: File[]; course: File | null };

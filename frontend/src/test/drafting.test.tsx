@@ -132,19 +132,29 @@ describe('drafting view', () => {
     expect(screen.getByRole('button', { name: 'Re-run analysis' })).toBeDisabled();
   });
 
-  it('rejects non-JSON uploads and reports server validation errors with retry', async () => {
+  it('uploads .fit rides as multipart, rejects other files and reports server errors with retry', async () => {
     let calls = 0;
-    mockApi(() => {
+    const fetchMock = mockApi(() => {
       calls += 1;
-      return calls === 1 ? { status: 422, body: { detail: "'riders' must list at least two riders." } } : { status: 200, body: draftingResponse };
+      return calls === 1 ? { status: 422, body: { detail: 'bad.fit: the FIT file is truncated.' } } : { status: 200, body: draftingResponse };
     });
     await openDrafting();
     await screen.findByRole('button', { name: 'Try multi-rider demo' });
     const input = document.querySelector('#panel-drafting input[type=file]') as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [new File(['{oops'], 'bad.json', { type: 'application/json' })] } });
-    expect(await screen.findByText(/is not valid JSON/)).toBeInTheDocument();
-    fireEvent.change(input, { target: { files: [new File(['{"format":"x"}'], 'doc.json', { type: 'application/json' })] } });
-    expect(await screen.findByText(/at least two riders/)).toBeInTheDocument();
+    expect(input).toHaveAttribute('accept', '.fit,.gpx');
+    const fit = (name: string) => new File([new Uint8Array([14, 0x20])], name);
+    fireEvent.change(input, { target: { files: [fit('a.fit'), new File(['{}'], 'riders.json')] } });
+    expect(await screen.findByText(/"riders.json" is not a .fit or .gpx file/)).toBeInTheDocument();
+    fireEvent.change(input, { target: { files: [fit('a.fit')] } });
+    expect(await screen.findByText(/at least two .fit files/)).toBeInTheDocument();
+    fireEvent.change(input, { target: { files: [fit('a.fit'), fit('bad.fit'), new File(['<gpx/>'], 'course.gpx')] } });
+    expect(await screen.findByText(/FIT file is truncated/)).toBeInTheDocument();
+    const [url, init] = fetchMock.mock.calls.at(-1)!;
+    expect(url).toBe('/api/drafting/analyze-fit');
+    const body = init!.body as FormData;
+    expect((body.getAll('files') as File[]).map((f) => f.name)).toEqual(['a.fit', 'bad.fit']);
+    expect((body.get('course') as File).name).toBe('course.gpx');
+    expect(JSON.parse(String(body.get('settings'))).zone_length_m).toBe(10);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByText('Fixture scenario')).toBeInTheDocument());
   });
