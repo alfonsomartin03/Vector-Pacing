@@ -13,7 +13,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, init);
+    res = await fetch(`${(import.meta.env.VITE_API_URL || '').replace(/\/$/, '')}${path}`, init);
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
     throw new ApiError(

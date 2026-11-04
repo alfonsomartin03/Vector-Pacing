@@ -23,6 +23,7 @@ from typing import Annotated, Any, Literal
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -222,6 +223,13 @@ def _meta(req: RunRequest, settings: OptimizerSettings) -> dict[str, Any]:
 
 app = FastAPI(title="Vector Pacing API", version=__version__)
 app.include_router(drafting_router)
+if origins := os.environ.get("VECTOR_PACING_CORS_ORIGINS", ""):
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[origin.strip() for origin in origins.split(",") if origin.strip()],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
 
 
 @app.exception_handler(ScenarioError)

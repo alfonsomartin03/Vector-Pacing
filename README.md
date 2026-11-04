@@ -160,3 +160,19 @@ this release:
 The original motivating question still stands: **can physics, physiology and numerical optimization
 together say how to ride a course as fast as possible?** v1.0 answers it for the offline,
 pre-race planning case and leaves the live-telemetry case unaddressed.
+
+## GitHub Pages
+
+The Pages workflow publishes the frontend on every push to `main`. In repository
+Settings → Pages, select **GitHub Actions** as the source.
+
+GitHub Pages cannot execute the Python backend. Host the backend separately using
+`uvicorn vector_pacing.api:app --host 0.0.0.0 --port 8000` after installing `backend`.
+Provide HTTPS on that host. Set its `VECTOR_PACING_CORS_ORIGINS` environment variable
+to `https://alfonsomartin03.github.io` (no trailing slash or repository path).
+Set the GitHub repository Actions variable `VITE_API_URL` to the backend HTTPS URL
+(no `/api` suffix), then rerun the Pages workflow. This URL is public, not a secret.
+Without it, the frontend displays a setup notice; calculations and uploads require the API.
+
+The workflow derives asset paths from Pages metadata, supporting project subpaths
+and custom domains. Local development and `make serve` keep same-origin API requests.
