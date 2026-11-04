@@ -4,7 +4,7 @@ import type { DraftingResponse, DraftingSettings, PresetsResponse, ScenarioRef }
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, init);
+    res = await fetch(`${(import.meta.env.VITE_API_URL || '').replace(/\/$/, '')}${path}`, init);
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
     throw new ApiError('Could not reach the Vector Pacing API. Is the backend running?', 0);

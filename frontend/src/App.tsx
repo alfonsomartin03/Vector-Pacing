@@ -191,6 +191,12 @@ export default function App() {
       </nav>
 
       <main id="main">
+        {import.meta.env.VITE_PAGES === 'true' && !import.meta.env.VITE_API_URL && (
+          <div className="alert alert-warn" role="status">
+            This site needs a hosted Vector Pacing API to run simulations and drafting checks.
+            Set the repository variable VITE_API_URL to your HTTPS backend URL and redeploy.
+          </div>
+        )}
         <div id="panel-drafting" role="tabpanel" aria-labelledby="tab-drafting" hidden={tab !== 'drafting'}>
           {draftingOpened && <DraftingView />}
         </div>
