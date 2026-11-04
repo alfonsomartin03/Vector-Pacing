@@ -1,282 +1,115 @@
-# Cycling Telemetry & Race Optimization Engine
+# Vector Pacing
 
-A real-time cycling telemetry, physiological modeling, and race optimization platform.
+**Cycling pacing simulator and optimizer — v1.0.0 (demonstration release).**
 
-## Overview
+Load a course, describe the rider, simulate a constant-power ride, let the optimizer propose a
+variable-power plan, compare the two, and export the result.
 
-This project aims to build a system capable of ingesting cycling telemetry data and using it to model an athlete's physiological state, simulate race scenarios, and calculate optimized pacing strategies.
+> **Model estimates only.** Results come from a simplified steady-state physics model and a CP/W′
+> balance approximation with the parameters you enter. They are not validated predictions and are
+> not medical or training advice. See [docs/MODEL.md](docs/MODEL.md).
+
+## What v1.0 does
 
-The system will combine:
-
-- Power
-- Heart rate
-- GPS
-- Speed
-- Cadence
-- Elevation and gradient
-- Athlete physiological parameters
-- Course data
-
-to create a real-time representation of rider state and predict how different pacing decisions affect race performance.
-
-## Core Goals
-
-### Telemetry Processing
-
-Process cycling telemetry from sources such as:
-
-- FIT files
-- GPX files
-- Recorded rides
-- Simulated sensor streams
-- Eventually live cycling sensors or cycling computer APIs
-
-Recorded rides can be replayed as simulated live telemetry for development and testing.
-
-### Physiological Modeling
-
-Model athlete state using metrics such as:
-
-- Critical Power (CP)
-- W′
-- W′ balance
-- Energy expenditure
-- Fatigue accumulation
-- Recovery
-- Estimated sustainable effort
-
-Example:
-
-    Power: 412 W
-    CP: 291 W
-    W′ Remaining: 7.3 / 18.7 kJ
-    Gradient: 6.8%
-    Estimated sustainable duration: 74 s
-
-### Cycling Physics
-
-Model the relationship between rider power and velocity using:
-
-- Aerodynamic drag
-- Rolling resistance
-- Rider + bike mass
-- Gradient
-- Air density
-- CdA
-- Crr
-
-Approximate power requirement:
-
-    P = ½ρCdA·v³ + Crr·m·g·v + m·g·v·sin(θ)
-
-### Race Simulation
-
-Given:
-
-- Athlete physiology
-- Rider/bike characteristics
-- GPX course
-- Environmental conditions
-
-simulate how different pacing strategies affect finishing time and physiological fatigue.
-
-### Race Optimization
-
-Determine a pacing strategy that minimizes total race time while respecting physiological constraints.
-
-Example:
-
-    40 km Time Trial
-
-    Constant pacing:
-    291 W
-    Estimated time: 56:41
-
-    Optimized pacing:
-    Climbs:    315 W
-    Flats:     287 W
-    Descents:  245 W
-
-    Estimated time: 55:47
-    Improvement: 54 seconds
-
-Potential optimization objective:
-
-    minimize total_time
-
-subject to constraints such as:
-
-    W′bal(t) >= 0
-
-and realistic limits on rider power and recovery.
-
-## Planned Architecture
-
-    FIT / GPX / Sensors
-            │
-            ▼
-    Telemetry Ingestion
-            │
-            ▼
-    Streaming Layer
-       WebSockets
-            │
-            ▼
-    Telemetry Server
-            │
-       ┌────┴─────┐
-       ▼          ▼
-    Database   Physiology Engine
-                  │
-                  ▼
-             Race Simulator
-                  │
-                  ▼
-             Optimizer
-                  │
-                  ▼
-              Dashboard
-
-## Potential Tech Stack
-
-### Frontend
-
-- React
-- TypeScript
-- D3 / Recharts
-- Mapbox or Leaflet
-
-### Backend
-
-- Python
-- FastAPI
-
-### Data
-
-- PostgreSQL
-- TimescaleDB
-
-### Streaming
-
-- WebSockets
-- Potential future MQTT/Kafka implementation
-
-### Scientific Computing
-
-- NumPy
-- SciPy
-
-### Infrastructure
-
-- Docker
-- GitHub Actions
-- Cloud deployment
-
-## Possible Repository Structure
-
-    cycling-telemetry/
-    │
-    ├── apps/
-    │   ├── dashboard/
-    │   └── api/
-    │
-    ├── services/
-    │   ├── telemetry/
-    │   ├── physiology/
-    │   └── optimizer/
-    │
-    ├── packages/
-    │   ├── fit-parser/
-    │   └── physics/
-    │
-    ├── simulator/
-    ├── tests/
-    ├── docker-compose.yml
-    └── README.md
-
-## Development Roadmap
-
-### Phase 1 — Course Physics
-
-- Parse GPX course data
-- Calculate gradient
-- Implement cycling physics model
-- Predict speed from rider power
-- Calculate simulated finishing time
-
-### Phase 2 — Athlete Model
-
-- Implement CP/W′ model
-- Implement W′ balance
-- Model fatigue and recovery
-- Connect athlete parameters to simulation
-
-### Phase 3 — Race Simulator
-
-- Simulate an athlete riding an entire course
-- Visualize power, speed, elevation, and W′
-- Compare pacing strategies
-
-### Phase 4 — Optimization
-
-- Implement numerical pacing optimization
-- Minimize predicted finishing time
-- Apply physiological constraints
-- Compare optimized vs constant-power strategies
-
-### Phase 5 — Telemetry Engine
-
-- Parse FIT files
-- Replay recorded rides as live telemetry
-- Stream data through WebSockets
-- Store telemetry in a time-series database
-
-### Phase 6 — Live Dashboard
-
-Create a real-time interface displaying:
-
-- Rider position
-- Power
-- Heart rate
-- Speed
-- Gradient
-- W′ remaining
-- Predicted sustainable effort
-- Course progress
-
-### Phase 7 — Live Hardware Integration
-
-Explore integration with:
-
-- Cycling power meters
-- Heart-rate monitors
-- Smart trainers
-- Garmin devices/APIs
-- Bluetooth/ANT+ sensors
-
-## Long-Term Ideas
-
-- Multi-rider race simulation
-- Drafting detection and modeling
-- Weather and wind integration
-- Real-time pacing recommendations
-- Race strategy comparison
-- Monte Carlo race simulations
-- Machine-learning fatigue models
-- Automatic CdA estimation
-- Team time-trial optimization
-- Cloud-based telemetry processing
-
-## Project Status
-
-**Status:** Planning / Research
-
-The initial development focus will be the course physics and race simulation engine before implementing real-time telemetry.
-
-## Motivation
-
-Cycling produces large amounts of telemetry, but most cycling software focuses on analyzing data after a ride.
-
-This project explores a different question:
-
-**Can real-time telemetry, physiological modeling, cycling physics, and numerical optimization be combined to determine how an athlete should race a course as fast as possible?**
+* **Courses.** A bundled, deterministic demo course (32 km, ~317 m climbing, works offline) or
+  your own GPX upload. Parsing is safe (`defusedxml`) and handles namespaces, multiple track segments,
+  routes, duplicate points and missing elevation. Malformed, empty, zero-length and oversized files
+  get clear error messages.
+* **Physics.** Aero drag, rolling resistance, gravity, drivetrain efficiency and rider + bike mass.
+  Explicit rules for coasting on steep descents, a braking speed limit, stalls and solver failures.
+* **Athlete model.** Critical power and W′ with W′-balance depletion and recovery tracked along the
+  course. Exhaustion is reported as infeasible and the negative balance is shown, not clamped.
+* **Baseline.** Constant power, either picked automatically (the highest feasible constant power) or
+  entered manually. The power used is always shown.
+* **Optimization.** Terrain-aware segments (2–30), power bounds, and W′ ≥ 0 at every step, solved by
+  SLSQP within a fixed compute budget. Each proposed plan is checked again in the same simulator
+  before it is reported. If the gain is negligible or the solver fails, the app says so.
+* **Interface.** Charts of elevation, power, speed and W′ against distance; a summary of time,
+  feasibility and time difference; a per-segment plan table; solver details. The UI includes
+  loading, empty, error, retry, cancel and reset states. Results go stale when inputs change. The
+  layout supports keyboard use and narrow screens.
+* **Export.** Full JSON with inputs, units, versions, summaries, segments and per-step series, plus
+  a per-step CSV that compares the two plans.
+
+## Quick start
+
+Requirements: Python ≥ 3.11, Node ≥ 20.19 (with npm), `make`. Runtime needs no network access or
+accounts (installing dependencies does need network).
+
+```bash
+make install
+```
+
+Single-process demo (builds the UI, then serves UI + API):
+
+```bash
+make serve
+```
+
+Open <http://127.0.0.1:8000> and click **Try demo course**, then **Optimize pacing**.
+
+Development mode (API with reload on :8000, Vite dev server on :5173):
+
+```bash
+make dev
+```
+
+Without `make`:
+
+```bash
+python3 -m venv backend/.venv && backend/.venv/bin/pip install -e "backend[dev]"
+cd frontend && npm ci && npm run build && cd ..
+backend/.venv/bin/uvicorn vector_pacing.api:app --app-dir backend --port 8000
+```
+
+## Checks
+
+```bash
+make check
+```
+
+This runs ruff, mypy, pytest, eslint, tsc, vitest and the production build, the same checks as
+[CI](.github/workflows/ci.yml). Run `make test` for tests only.
+
+## Repository layout
+
+```
+backend/vector_pacing/   course.py · physics.py · athlete.py · simulate.py · optimize.py · api.py
+backend/vector_pacing/data/demo_course.gpx   bundled demo (regenerate: backend/scripts/generate_demo_course.py)
+backend/tests/           pytest: parsing edge cases, physics, W′, simulation rules, optimizer, API
+frontend/src/            React app, API client, validation, export, charts; vitest tests in src/test
+samples/                 GPX files for upload testing (incl. a deliberately malformed one)
+docs/                    MODEL.md · ARCHITECTURE.md · DEMO.md · RELEASE_CHECKLIST.md
+```
+
+## Documentation
+
+* [Model assumptions and limitations](docs/MODEL.md)
+* [Architecture](docs/ARCHITECTURE.md)
+* [Demo script](docs/DEMO.md)
+* [Release notes](RELEASE_NOTES.md)
+* [Release checklist](docs/RELEASE_CHECKLIST.md)
+
+## Known limitations
+
+No wind, drafting, acceleration or inertia. Air density and CP are constant. W′ recovery is a simple
+approximation. The optimizer is local and works on segments, so it does not guarantee a global
+optimum. Estimates come without uncertainty bounds. Details are in
+[docs/MODEL.md §7](docs/MODEL.md#7-known-limitations).
+
+## Deferred ideas (not part of v1.0)
+
+The original concept went further. The following are **not implemented** and are not planned for
+this release:
+
+* FIT file parsing, recorded-ride replay, live telemetry and WebSocket streaming
+* Time-series database storage (PostgreSQL/TimescaleDB)
+* Heart rate, cadence and other sensor channels, and Bluetooth/ANT+, Garmin or smart-trainer integration
+* Real-time pacing recommendations during a ride
+* Wind/weather, drafting, multi-rider and team time-trial simulation
+* Monte Carlo uncertainty, machine-learning fatigue models, automatic CdA estimation
+* Maps, cloud deployment, Docker and accounts
+
+The original motivating question still stands: **can physics, physiology and numerical optimization
+together say how to ride a course as fast as possible?** v1.0 answers it for the offline,
+pre-race planning case and leaves the live-telemetry case unaddressed.
