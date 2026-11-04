@@ -21,7 +21,6 @@ export function buildDraftJson(r: DraftingResponse, generatedAt: Date): string {
       counts: r.counts,
       events: r.events,
       dismissed_encounters: r.encounters,
-      power_screen: r.power_screen,
     },
     null,
     2,
@@ -35,7 +34,7 @@ export function buildDraftCsv(r: DraftingResponse): string {
   const header = [
     'event_id', 'follower', 'leader', 'classification', 'start_time', 'end_time', 'start_s', 'end_s', 'duration_s',
     'counted_s', 'exempt_s', 'missing_s', 'gap_median_m', 'gap_min_m', 'gap_max_m', 'gap_sigma_m',
-    'probability_in_zone', 'data_quality', 'lateral_used', 'order_uncertain', 'course_start_m', 'course_end_m', 'power_anomaly_ids', 'limitations',
+    'probability_in_zone', 'data_quality', 'lateral_used', 'order_uncertain', 'course_start_m', 'course_end_m', 'limitations',
   ];
   const lines = [
     `# Vector Pacing ${r.meta.app_version} | drafting model ${r.meta.drafting_model_version} | scenario "${r.scenario.name.replace(/"/g, "'")}" (${r.scenario.content_hash})`,
@@ -49,29 +48,9 @@ export function buildDraftCsv(r: DraftingResponse): string {
         e.id, e.follower, e.leader, e.classification, clock(e.start_s, r.scenario.start_time), clock(e.end_s, r.scenario.start_time),
         e.start_s, e.end_s, e.duration_s, e.counted_s, e.exempt_s, e.missing_s, e.gap_median_m ?? '', e.gap_min_m ?? '',
         e.gap_max_m ?? '', e.sigma_median_m ?? '', e.probability_in_zone ?? '', e.quality, e.lateral_used, e.order_uncertain,
-        e.course_start_m ?? '', e.course_end_m ?? '', e.power_anomaly_ids.join(' '), q(e.limitations.join(' | ')),
+        e.course_start_m ?? '', e.course_end_m ?? '', q(e.limitations.join(' | ')),
       ].join(','),
     );
-  }
-  const ps = r.power_screen;
-  if (ps && ps.anomalies.length) {
-    lines.push('', `# Power screen (within rider, ${ps.version}): ${ps.note}`);
-    lines.push(
-      [
-        'anomaly_id', 'rider', 'start_time', 'end_time', 'start_s', 'end_s', 'duration_s', 'review_priority',
-        'average_speed_kmh', 'average_power_w', 'reference_power_w', 'deficit_w', 'comparable_sections',
-        'speed_normalised', 'lat', 'lon', 'gps_event_ids',
-      ].join(','),
-    );
-    for (const a of ps.anomalies) {
-      lines.push(
-        [
-          a.id, a.rider, clock(a.start_s, r.scenario.start_time), clock(a.end_s, r.scenario.start_time), a.start_s, a.end_s,
-          a.duration_s, a.score, a.average_speed_kmh, a.average_power_w ?? '', a.reference_power_w, a.deficit_w,
-          a.peer_count, a.speed_normalised, a.lat, a.lon, a.gps_event_ids.join(' '),
-        ].join(','),
-      );
-    }
   }
   return lines.join('\n') + '\n';
 }

@@ -1,10 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../App';
 import { buildDraftCsv, buildDraftJson } from '../drafting/export';
 import { clock } from '../drafting/format';
 import { formFromSettings, parseExempt, validateDraft } from '../drafting/settings';
-import { draftingResponse, fitResponse, presets } from './draftingFixtures';
+import { draftingResponse, presets } from './draftingFixtures';
 
 describe('drafting settings', () => {
   it('parses exempt sections and reports bad lines', () => {
@@ -54,27 +56,26 @@ describe('drafting export', () => {
     expect(lines[4]).toMatch(/^E001,R02,R01,potential_drafting,08:01:41 UTC/);
     expect(lines[4]).toMatch(/"Combined gap uncertainty/);
   });
-  it('CSV and JSON include the power screen when present', () => {
-    const lines = buildDraftCsv(fitResponse).trim().split('\n');
-    expect(lines[4]).toMatch(/,P001,"Combined/);
-    expect(lines.some((l) => l.startsWith('# Power screen (within rider'))).toBe(true);
-    expect(lines.at(-1)).toMatch(/^P001,R02,08:01:45 UTC,08:02:35 UTC,.*,E001$/);
-    expect(JSON.parse(buildDraftJson(fitResponse, new Date())).power_screen.anomalies[0].id).toBe('P001');
-    expect(JSON.parse(buildDraftJson(draftingResponse, new Date())).power_screen).toBeNull();
+  it('CSV has no power-screen columns in the browser demo', () => {
+    expect(buildDraftCsv(draftingResponse)).not.toMatch(/power/i);
+    expect(JSON.parse(buildDraftJson(draftingResponse, new Date()))).not.toHaveProperty('power_screen');
   });
 });
 
-function mockApi(analyze: () => { status: number; body: unknown } = () => ({ status: 200, body: draftingResponse })) {
-  const fn = vi.fn(async (url: string, _init?: RequestInit) => {
-    void _init;
-    const r = url.endsWith('/api/drafting/presets') ? { status: 200, body: presets } : analyze();
-    return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
-  });
-  vi.stubGlobal('fetch', fn);
-  return fn;
-}
+const DEMO_NAME = 'Out-and-back ITT — illustrative drafting scenario';
+const sample = (name: string) => readFileSync(resolve(__dirname, '../../../samples', name), 'utf8');
 
-afterEach(() => vi.unstubAllGlobals());
+let fetchSpy: ReturnType<typeof vi.fn>;
+beforeEach(() => {
+  fetchSpy = vi.fn(async () => {
+    throw new Error('Unexpected network request');
+  });
+  vi.stubGlobal('fetch', fetchSpy);
+});
+afterEach(() => {
+  expect(fetchSpy).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
 
 async function openDrafting() {
   const user = userEvent.setup();
@@ -83,56 +84,53 @@ async function openDrafting() {
   return user;
 }
 
-describe('drafting view', () => {
-  it('runs the demo with illustrative exempt sections and shows potential drafting', async () => {
-    const fetchMock = mockApi();
-    const user = await openDrafting();
-    await user.click(await screen.findByRole('button', { name: 'Try multi-rider demo' }));
-    expect(await screen.findByText('Fixture scenario')).toBeInTheDocument();
-    const req = JSON.parse(String(fetchMock.mock.calls[1]![1]!.body));
-    expect(req.scenario).toEqual({ kind: 'demo' });
-    expect(req.settings.exempt_sections[0].start_m).toBe(3950);
+async function runDemo() {
+  const user = await openDrafting();
+  await user.click(screen.getByRole('button', { name: 'Try multi-rider demo' }));
+  expect(await screen.findByText(DEMO_NAME, {}, { timeout: 10_000 })).toBeInTheDocument();
+  return user;
+}
+
+describe('drafting view (browser engine)', () => {
+  it('runs the bundled demo with illustrative exempt sections and shows potential drafting', async () => {
+    const user = await runDemo();
+    expect(screen.getByLabelText(/Exempt course sections/)).toHaveValue('3950-4085 Turnaround (illustrative)');
     expect(screen.getByText(/Illustrative settings\./)).toBeInTheDocument();
-    // First flagged event is auto-selected and its details are shown.
-    expect(screen.getByRole('heading', { name: /E001: R02 behind R01/ })).toBeInTheDocument();
-    // Non-flagged intervals are hidden until requested.
+    const chips = screen.getByRole('list', { name: 'Interval counts' });
+    expect(within(chips).getByText(/Potential drafting:/)).toHaveTextContent('Potential drafting: 1');
+    expect(within(chips).getByText(/Exempt section:/)).toHaveTextContent('Exempt section: 2');
+    // The flagged interval is auto-selected and its details are shown.
+    expect(screen.getByRole('heading', { name: /behind/ })).toBeInTheDocument();
     const table = screen.getByRole('table', { name: /Intervals/ });
-    expect(within(table).queryByText('E002')).not.toBeInTheDocument();
+    const before = within(table).getAllByRole('row').length;
     await user.click(screen.getByLabelText(/Show non-flagged intervals/));
-    expect(within(table).getByText('E002')).toBeInTheDocument();
-    await user.click(within(table).getByRole('button', { name: 'Inspect E002' }));
-    expect(screen.getByRole('heading', { name: /E002: R03 behind R02/ })).toBeInTheDocument();
+    expect(within(table).getAllByRole('row').length).toBeGreaterThan(before);
   });
 
-  it('marks results stale when settings change and disables export', async () => {
-    mockApi();
-    const user = await openDrafting();
-    await user.click(await screen.findByRole('button', { name: 'Try multi-rider demo' }));
-    await screen.findByText('Fixture scenario');
+  it('recomputes when settings change, and marks old results stale until then', async () => {
+    const user = await runDemo();
     const exportBtn = screen.getByRole('button', { name: 'Export JSON (full)' });
     expect(exportBtn).toBeEnabled();
-    const zone = screen.getByLabelText(/Zone length/);
-    await user.clear(zone);
-    await user.type(zone, '12');
+    const ta = screen.getByLabelText(/Exempt course sections/);
+    await user.clear(ta);
     expect(screen.getByText(/Results are out of date/)).toBeInTheDocument();
     expect(exportBtn).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Re-run analysis' }));
+    // Without the exempt turnaround, the two exempt intervals become an overtake and an inconclusive one.
+    await waitFor(() => expect(screen.getByText(/Exempt section:/)).toHaveTextContent('Exempt section: 0'));
+    expect(screen.getByText(/Overtake within allowance:/)).toHaveTextContent('Overtake within allowance: 3');
+    expect(screen.queryByText(/Results are out of date/)).not.toBeInTheDocument();
   });
 
   it('applies an illustrative preset', async () => {
-    mockApi();
-    const user = await openDrafting();
-    await user.click(await screen.findByRole('button', { name: 'Try multi-rider demo' }));
-    await screen.findByText('Fixture scenario');
+    const user = await runDemo();
     await user.selectOptions(screen.getByLabelText('Preset'), 'illustrative_long_zone');
     expect(screen.getByLabelText(/Zone length/)).toHaveValue(15);
     expect(screen.getByText(/Not taken from any governing body/)).toBeInTheDocument();
   });
 
   it('shows invalid exempt input and blocks re-run', async () => {
-    mockApi();
-    const user = await openDrafting();
-    await user.click(await screen.findByRole('button', { name: 'Try multi-rider demo' }));
-    await screen.findByText('Fixture scenario');
+    const user = await runDemo();
     const ta = screen.getByLabelText(/Exempt course sections/);
     await user.clear(ta);
     await user.type(ta, 'nonsense');
@@ -140,64 +138,31 @@ describe('drafting view', () => {
     expect(screen.getByRole('button', { name: 'Re-run analysis' })).toBeDisabled();
   });
 
-  it('uploads .fit rides as multipart, rejects other files and reports server errors with retry', async () => {
-    let calls = 0;
-    const fetchMock = mockApi(() => {
-      calls += 1;
-      return calls === 1 ? { status: 422, body: { detail: 'bad.fit: the FIT file is truncated.' } } : { status: 200, body: draftingResponse };
-    });
+  it('analyses uploaded .fit rides and JSON locally, and rejects unsupported selections', async () => {
     await openDrafting();
-    await screen.findByRole('button', { name: 'Try multi-rider demo' });
     const input = document.querySelector('#panel-drafting input[type=file]') as HTMLInputElement;
-    expect(input).toHaveAttribute('accept', '.fit,.gpx');
-    const fit = (name: string) => new File([new Uint8Array([14, 0x20])], name);
-    fireEvent.change(input, { target: { files: [fit('a.fit'), new File(['{}'], 'riders.json')] } });
-    expect(await screen.findByText(/"riders.json" is not a .fit or .gpx file/)).toBeInTheDocument();
-    fireEvent.change(input, { target: { files: [new File(['<gpx/>'], 'course.gpx')] } });
-    expect(await screen.findByText(/at least one .fit file/)).toBeInTheDocument();
-    fireEvent.change(input, { target: { files: [fit('a.fit'), fit('bad.fit'), new File(['<gpx/>'], 'course.gpx')] } });
-    expect(await screen.findByText(/FIT file is truncated/)).toBeInTheDocument();
-    const [url, init] = fetchMock.mock.calls.at(-1)!;
-    expect(url).toBe('/api/drafting/analyze-fit');
-    const body = init!.body as FormData;
-    expect((body.getAll('files') as File[]).map((f) => f.name)).toEqual(['a.fit', 'bad.fit']);
-    expect((body.get('course') as File).name).toBe('course.gpx');
-    expect(JSON.parse(String(body.get('settings'))).zone_length_m).toBe(10);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(screen.getByText('Fixture scenario')).toBeInTheDocument());
-  });
-
-  it('shows the power screen for .fit uploads and links it with the GPS interval', async () => {
-    mockApi(() => ({ status: 200, body: fitResponse }));
-    const user = await openDrafting();
-    await screen.findByRole('button', { name: 'Try multi-rider demo' });
-    const input = document.querySelector('#panel-drafting input[type=file]') as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [new File([new Uint8Array([14])], 'R02.fit')] } });
-    expect(await screen.findByRole('heading', { name: 'Power screen (within rider)' })).toBeInTheDocument();
-    const table = screen.getByRole('table', { name: /Power anomalies \(1\) — 2 of 3 riders with power/ });
-    expect(within(table).getByText(/269 W vs 367 W \(−98 W, 146 sections\)/)).toBeInTheDocument();
-    expect(screen.getByText(/R03: No power recorded/)).toBeInTheDocument();
-    // E001 is auto-selected; its detail shows the overlapping power anomaly.
-    expect(screen.getByText(/P001: 269 W vs 367 W own reference/)).toBeInTheDocument();
-    await user.click(screen.getByLabelText(/Show non-flagged intervals/));
-    await user.click(screen.getByRole('button', { name: 'Inspect E002' }));
-    expect(screen.getByText('no overlapping power anomaly')).toBeInTheDocument();
-    await user.click(within(table).getByRole('button', { name: 'Inspect E001' }));
-    expect(screen.getByRole('heading', { name: /E001: R02 behind R01/ })).toBeInTheDocument();
-  });
-
-  it('hides the power screen for the demo (no power data)', async () => {
-    mockApi();
-    const user = await openDrafting();
-    await user.click(await screen.findByRole('button', { name: 'Try multi-rider demo' }));
-    await screen.findByText('Fixture scenario');
-    expect(screen.queryByRole('heading', { name: 'Power screen (within rider)' })).not.toBeInTheDocument();
+    expect(input).toHaveAttribute('accept', '.fit,.gpx,.json');
+    const choose = (...files: File[]) => fireEvent.change(input, { target: { files } });
+    const fit = (path: string) => new File([readFileSync(resolve(__dirname, '../../../samples', path))], path.split('/').at(-1)!);
+    choose(new File(['x'], 'notes.txt'));
+    expect(await screen.findByText(/"notes.txt" is not a .fit, .gpx or .json file/)).toBeInTheDocument();
+    choose(fit('drafting_with_power/R01.fit'));
+    expect(await screen.findByText(/at least two .fit files/)).toBeInTheDocument();
+    choose(fit('drafting_two_riders/A.fit'), fit('drafting_invalid.fit'));
+    expect(await screen.findByText(/Analysis failed: drafting_invalid.fit: the FIT file is truncated/)).toBeInTheDocument();
+    choose(fit('drafting_with_power/R01.fit'), fit('drafting_with_power/R02.fit'), new File([sample('drafting_with_power/course.gpx')], 'course.gpx'));
+    expect(await screen.findByText('2 riders from .fit files', {}, { timeout: 10_000 })).toBeInTheDocument();
+    expect(screen.getByText(/Potential drafting:/)).toHaveTextContent('Potential drafting: 1');
+    expect(screen.getByRole('heading', { name: /R02 behind R01/ })).toBeInTheDocument();
+    choose(new File(['{oops'], 'broken.json'));
+    expect(await screen.findByText(/Analysis failed: "broken.json" is not valid JSON/)).toBeInTheDocument();
+    choose(new File([sample('drafting_two_riders.json')], 'two.json'));
+    expect(await screen.findByText(/Two riders \(converted from/)).toBeInTheDocument();
+    expect(screen.getByText(/Inconclusive \(data quality\):/)).toHaveTextContent('Inconclusive (data quality): 1');
   });
 
   it('keeps pacing and drafting tabs independent and keyboard switchable', async () => {
-    mockApi();
     const user = await openDrafting();
-    await screen.findByRole('button', { name: 'Try multi-rider demo' });
     const tab = screen.getByRole('tab', { name: 'Drafting check' });
     tab.focus();
     await user.keyboard('{ArrowLeft}');

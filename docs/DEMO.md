@@ -1,6 +1,7 @@
 # Demo script (≈5 minutes)
 
-Prerequisite: `make install` once, then `make serve` and open <http://127.0.0.1:8000>.
+Use the GitHub Pages site, or run `make install` once, then `make dev` and open <http://127.0.0.1:5173>.
+Everything runs in the browser; no backend is involved.
 
 1. **Start.** Point out the empty state and the "Model estimates only" footer. Click **Try demo course**.
    The *Vector Valley TT (demo)* loads: 32.0 km, ~317 m climbing, −5.7 % to +6.9 %.
@@ -9,20 +10,21 @@ Prerequisite: `make install` once, then `make serve` and open <http://127.0.0.1:
    disabled run buttons, then restore `280`.
 3. **Baseline.** Click **Simulate baseline**. Auto baseline = 286 W constant (the highest whole-watt
    power that keeps W′ ≥ 0), estimated 52:05, feasible. Show the W′ chart draining to ~1 kJ at the finish.
-4. **Optimize.** Click **Optimize pacing** (~2 s). Expected: optimized 51:04, feasible,
-   **−61.2 s** under the model. Show the power chart (harder on the km 9–11 climb and the late kicker,
-   easier on descents) and the W′ chart touching but never crossing zero. Open **Solver details** —
-   SLSQP may report the iteration limit; the best *verified* feasible plan is used anyway.
+4. **Optimize.** Click **Optimize pacing** (well under a second). Expected: optimized 51:08, feasible,
+   **−57.3 s** under the model. Show the power chart (harder on the km 9–11 climb and the late kicker,
+   easier on descents) and the W′ chart staying above zero. Open **Solver details**: the method is the
+   browser heuristic, with its simulation count and budget. Point out that it is a simplified search,
+   not the Python reference's SLSQP (which found −61.2 s).
 5. **Stale protection.** Change W′ to `15`. Banner: "Results are out of date", charts dim, export
    disabled. Click **Optimize pacing** again to refresh.
 6. **Infeasible input.** Choose **Manual** baseline at `400` W → Optimize. Baseline shows
    "Infeasible", W′ reaches about −302 kJ (not clamped), and optimization refuses with an explanation.
    Switch back to **Auto**.
-7. **Upload.** Click **Upload GPX…** and choose `samples/hill_climb_two_segments.gpx`. Notes explain
+7. **Upload.** Click **Choose GPX…** and choose `samples/hill_climb_two_segments.gpx`. Notes explain
    joined segments, removed duplicate points and interpolated elevation. Optimize again.
    Then try `samples/invalid_malformed.gpx` to show the error + "Choose another file".
 8. **Export.** Click **Export JSON (full)** and **Export CSV (per step)**. Both include parameters,
-   units, app version 1.0.0 and model `vp-model-1.0`.
+   units, app version 1.1.0 and model `vp-model-1.0+web-heuristic-1`.
 
 ## Drafting check (≈2 minutes)
 
@@ -48,14 +50,12 @@ Prerequisite: `make install` once, then `make serve` and open <http://127.0.0.1:
 12. **Adjust rules.** Choose the preset **Illustrative — long zone (15 m / 30 s)**. Results go stale
     and export is disabled. Click **Re-run analysis**: inconclusive drops to 3, and R02 → R01 is still
     the only flag.
-13. **Upload.** Click **Upload rides (.fit)…** and select all three files in
+13. **Upload.** Click **Upload rides (.fit) or .json…** and select all three files in
     `samples/drafting_two_riders/` (`A.fit`, `B.fit`, `course.gpx`). No accuracy is recorded, so the
-    5 m assumption applies, and the result is **inconclusive**, not a flag. Open *Data-quality
-    settings*, set *Assumed accuracy* to 1 m and re-run: now 1 potential drafting. Then upload `A.fit`
-    together with `samples/drafting_invalid.fit` to show the validation error.
-    **Power screen.** Upload the three files in `samples/drafting_with_power/`. E001 (R02 behind
-    R01, potential drafting) is linked to P001 in the *Power screen* card: about 269 W against R02's
-    own 367 W reference. Then upload `R02.fit` alone: no GPS check is possible, but the power screen
-    still finds P001.
+    5 m assumption applies and the result is **inconclusive**, not a flag. Open *Data-quality
+    settings*, set *Assumed accuracy* to 1 m and re-run: now there is 1 potential drafting. Then select
+    `A.fit` together with `samples/drafting_invalid.fit` to show the validation error. The three files
+    in `samples/drafting_with_power/` give one potential-drafting interval (R02 behind R01).
+    `samples/drafting_two_riders.json` shows the JSON format.
 14. **Export.** Click **Export JSON (full)** and **Export CSV (intervals)**. Both include the
     settings, the illustrative note, per-interval limitations and the disclaimer.

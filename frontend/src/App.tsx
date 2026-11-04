@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, fetchDemoCourse, optimize, parseCourseFile, simulate } from './api';
+import { EngineError, loadCourseFile, loadDemoCourse, runPacing } from './engine/client';
+import { courseInfo, type CourseModel } from './engine/course';
+import type { CourseSource } from './engine/pacing';
 import { Charts } from './components/Charts';
 import { DraftingView } from './drafting/DraftingView';
 import { ParamsForm } from './components/ParamsForm';
@@ -7,11 +9,11 @@ import { SegmentsTable, SolverDetails, Summary } from './components/Results';
 import { buildCsvExport, buildJsonExport, downloadText, exportBaseName } from './export';
 import { km } from './format';
 import { defaultForm, inputsKey, validate, type FormState } from './params';
-import type { CourseInfo, CourseRef, OptimizeResponse, SimulateResponse } from './types';
+import type { CourseInfo, OptimizeResponse, SimulateResponse } from './types';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-type Course = { ref: CourseRef; info: CourseInfo };
+type Course = { model: CourseModel; source: CourseSource; info: CourseInfo };
 type RunKind = 'simulate' | 'optimize';
 type RunState =
   | { status: 'idle' }
@@ -22,7 +24,7 @@ type RunState =
 type CourseStatus = { loading: true } | { loading: false; error?: string; retry?: 'demo' | 'upload' | 'pick' };
 
 const courseId = (c: Course | null) => (c ? `${c.info.source}:${c.info.content_hash}` : null);
-const errorMessage = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : 'Unexpected error.');
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Unexpected error.');
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
 
 export default function App() {
@@ -61,8 +63,9 @@ export default function App() {
     const signal = newSignal();
     setCourseStatus({ loading: true });
     try {
-      const info = await fetchDemoCourse(signal);
-      setCourse({ ref: { kind: 'demo' }, info });
+      const model = await loadDemoCourse();
+      if (signal.aborted) return;
+      setCourse({ model, source: { kind: 'demo' }, info: courseInfo(model) });
       setCourseStatus({ loading: false });
       setRun({ status: 'idle' });
       setLastResult(null);
@@ -84,15 +87,16 @@ export default function App() {
     const signal = newSignal();
     setCourseStatus({ loading: true });
     try {
-      const [info, text] = await Promise.all([parseCourseFile(file, signal), file.text()]);
-      setCourse({ ref: { kind: 'gpx', gpx_text: text, filename: file.name }, info });
+      const model = await loadCourseFile(file);
+      if (signal.aborted) return;
+      setCourse({ model, source: { kind: 'gpx', filename: file.name }, info: courseInfo(model) });
       setCourseStatus({ loading: false });
       setRun({ status: 'idle' });
       setLastResult(null);
     } catch (e) {
       if (!isAbort(e)) {
-        // Network/server failures can be retried with the same file; invalid files need a different one.
-        const retry = e instanceof ApiError && e.status === 422 ? 'pick' : 'upload';
+        // Invalid files need a different file; unexpected read errors can be retried with the same one.
+        const retry = e instanceof EngineError ? 'pick' : 'upload';
         setCourseStatus({ loading: false, error: `Could not load "${file.name}": ${errorMessage(e)}`, retry });
       }
     }
@@ -104,7 +108,7 @@ export default function App() {
       const signal = newSignal();
       setRun({ status: 'running', kind });
       try {
-        const data = await (kind === 'simulate' ? simulate : optimize)(course.ref, params, signal);
+        const data = await runPacing(kind, course.model, course.source, params, signal);
         const done = { status: 'done' as const, kind, key: currentKey, data };
         setRun(done);
         setLastResult(done);
@@ -151,7 +155,7 @@ export default function App() {
       <header className="topbar">
         <div>
           <h1>Vector Pacing</h1>
-          <p className="tagline">Cycling pacing simulator · constant vs optimized power · model estimates only</p>
+          <p className="tagline">Cycling pacing simulator · constant vs variable power · runs in your browser · model estimates only</p>
         </div>
         {course && tab === 'pacing' && (
           <button type="button" className="btn btn-quiet" onClick={startOver}>
@@ -191,12 +195,6 @@ export default function App() {
       </nav>
 
       <main id="main">
-        {import.meta.env.VITE_PAGES === 'true' && !import.meta.env.VITE_API_URL && (
-          <div className="alert alert-warn" role="status">
-            This site needs a hosted Vector Pacing API to run simulations and drafting checks.
-            Set the repository variable VITE_API_URL to your HTTPS backend URL and redeploy.
-          </div>
-        )}
         <div id="panel-drafting" role="tabpanel" aria-labelledby="tab-drafting" hidden={tab !== 'drafting'}>
           {draftingOpened && <DraftingView />}
         </div>
@@ -209,7 +207,7 @@ export default function App() {
             </button>
             <span className="or">or</span>
             <label className={`btn btn-secondary file-btn${courseStatus.loading || running ? ' is-disabled' : ''}`}>
-              Upload GPX…
+              Choose GPX…
               <input
                 ref={fileRef}
                 type="file"
@@ -256,8 +254,8 @@ export default function App() {
           </div>
           {!course && !courseStatus.loading && (
             <p className="empty">
-              No course loaded yet. Start with the bundled <strong>demo course</strong> (works offline), or upload a GPX file
-              with a track or route. Elevation is taken from the file.
+              No course loaded yet. Start with the bundled <strong>demo course</strong>, or choose a GPX file with a track or
+              route. Files are read in your browser and never uploaded. Elevation is taken from the file.
             </p>
           )}
           {course && (
@@ -273,7 +271,7 @@ export default function App() {
                   {course.info.min_grade_pct.toFixed(1)} % to {course.info.max_grade_pct.toFixed(1)} %
                 </dd>
                 <dt>Source</dt>
-                <dd>{course.ref.kind === 'demo' ? 'Bundled demo' : course.info.source}</dd>
+                <dd>{course.source.kind === 'demo' ? 'Bundled demo' : course.info.source}</dd>
               </dl>
               {course.info.warnings.length > 0 && (
                 <div className="alert alert-warn">
@@ -326,7 +324,7 @@ export default function App() {
                   <p className="status">
                     <span className="spinner" aria-hidden="true" />
                     {run.kind === 'optimize'
-                      ? 'Optimizing pacing (bounded to 30 s)…'
+                      ? 'Searching for a variable-power plan in your browser (bounded)…'
                       : 'Simulating constant-power baseline…'}
                   </p>
                 )}
@@ -359,7 +357,8 @@ export default function App() {
               {!result && !running && run.status !== 'error' && (
                 <p className="empty">
                   Run <strong>Simulate baseline</strong> to see constant-power time and W′, or{' '}
-                  <strong>Optimize pacing</strong> to also compute and verify a variable-power plan.
+                  <strong>Optimize pacing</strong> to also search for a variable-power plan (a simple browser heuristic)
+                  and verify it in the same simulator.
                 </p>
               )}
 
@@ -399,7 +398,8 @@ export default function App() {
       <footer className="footer">
         <p>
           <strong>Model estimates, not predictions.</strong> Vector Pacing uses a simplified steady-state physics model and
-          a CP/W′ balance approximation with the parameters you enter. Results are not validated against real rides and
+          a CP/W′ balance approximation with the parameters you enter, computed in your browser. The variable-power plan
+          comes from a bounded heuristic search, not a proven optimum. Results are not validated against real rides and
           are not medical or training advice. The drafting check reports <em>potential</em> drafting for human review only;
           it does not confirm rules violations or apply penalties.
         </p>

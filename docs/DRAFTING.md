@@ -5,34 +5,26 @@ such as individual time trials and non-drafting triathlon bike legs. It reports 
 for a person to review. It **does not** confirm a rules violation, and it never issues or suggests
 penalties.
 
-It combines two independent kinds of evidence:
+In the browser demo it runs the **GPS following check** (two or more riders): sustained following
+inside a configurable zone, described below. All analysis runs in your browser (in a Web Worker).
 
-* **GPS following check** (two or more riders): sustained following inside a configurable zone,
-  described below.
-* **Within-rider power screen** (any rider whose `.fit` file has power, even a single ride): sections
-  where the rider held speed on clearly less power than in their own comparable sections. It comes
-  from [RaceGuard](https://github.com/alfonsomartin03/RaceGuard), merged into this repository; see
-  [Power screen](#power-screen-within-rider). Where both kinds of evidence overlap in time for the
-  same rider, they are linked in the report.
+The Python reference in `backend/` also has a **within-rider power screen** from
+[RaceGuard](https://github.com/alfonsomartin03/RaceGuard) for `.fit` rides with power; see
+[Power screen](#power-screen-within-rider). It is not part of the browser demo.
 
 The drafting check is independent of the pacing simulator and optimizer. It does not model pack
 dynamics or multi-rider tactics.
 
-Code: [`backend/vector_pacing/drafting.py`](../backend/vector_pacing/drafting.py) (GPS check),
-[`power_screen.py`](../backend/vector_pacing/power_screen.py) (power screen),
-[`review.py`](../backend/vector_pacing/review.py) (`.fit` upload → both checks),
-[`drafting_api.py`](../backend/vector_pacing/drafting_api.py) (HTTP),
-[`cli.py`](../backend/vector_pacing/cli.py) (command line),
-[`frontend/src/drafting/`](../frontend/src/drafting) (UI).
-
-Command line (installed with the backend):
+Code: [`frontend/src/engine/drafting.ts`](../frontend/src/engine/drafting.ts) (GPS check, a
+TypeScript port of the Python reference with identical results on the bundled scenario) and
+[`frontend/src/drafting/`](../frontend/src/drafting) (UI). The Python reference is in
+[`backend/vector_pacing/drafting.py`](../backend/vector_pacing/drafting.py), with
+[`power_screen.py`](../backend/vector_pacing/power_screen.py), [`review.py`](../backend/vector_pacing/review.py)
+and a command line ([`cli.py`](../backend/vector_pacing/cli.py)):
 
 ```bash
 vector-pacing-review samples/drafting_with_power/R01.fit samples/drafting_with_power/R02.fit --course samples/drafting_with_power/course.gpx
 ```
-
-Add `--json` for the full JSON report, `--output FILE` to write it to a file and `--settings '{"zone_length_m": 12}'`
-to change detection settings. The exit status is 2 for unreadable input.
 
 ## Rules are configurable, not universal
 
@@ -68,44 +60,85 @@ each one must record its source document and effective date.
 | Smoothing window | 5 s | Rolling median applied to positions. |
 | Analysis step | 1 s | Common time grid. |
 
+## Import format `vector-pacing-riders/1`
+
+A single JSON document with a course line and timestamped positions for each rider. File uploads are
+limited to 20 MB, 200 riders, 500 000 samples and 24 h per rider. Live tracking integrations are not
+supported.
+
+```json
+{
+  "format": "vector-pacing-riders/1",
+  "name": "My event, wave 2",
+  "description": "optional",
+  "illustrative": false,
+  "start_time": "2026-06-14T08:00:00Z",
+  "course": { "name": "optional", "points": [[44.1, 5.2], [44.1001, 5.2004]] },
+  "riders": [
+    {
+      "id": "R01",
+      "label": "optional display name",
+      "samples": [
+        { "t": 0.0, "lat": 44.1, "lon": 5.2, "accuracy_m": 1.5 },
+        { "t": 1.0, "lat": 44.10001, "lon": 5.20013, "accuracy_m": 1.5 }
+      ]
+    }
+  ]
+}
+```
+
+* `course.points`: `[lat, lon]` pairs in riding order (WGS-84 degrees). At least 2 points.
+* Time: either `t` (seconds, any common origin) **or** `time` (ISO 8601; `Z`/offset or UTC assumed),
+  used consistently in the whole document. `start_time` (optional) is shown as clock time for `t = 0`.
+* `accuracy_m`: optional 1-σ horizontal position error in metres. Where it is missing, the
+  *assumed accuracy* setting is used, and the rider is marked "accuracy not reported".
+* `samples` may be a list of objects (row form) or an object of equal-length arrays (columnar form:
+  `{"t": [...], "lat": [...], "lon": [...], "accuracy_m": [...]}`).
+* Samples with `null` lat/lon are ignored with a warning. Unsorted samples are sorted, and
+  duplicate timestamps are dropped. Both are reported in the data-quality table.
+* At least two riders, each with at least two positioned samples. Rider ids must be unique.
+
+Examples: [`samples/drafting_two_riders.json`](../samples/drafting_two_riders.json) (columnar form,
+two riders, no accuracy; converted from the `.fit` samples) and the bundled scenario
+[`frontend/src/data/drafting_demo.json`](../frontend/src/data/drafting_demo.json) (12 riders).
+
+In the browser demo, choose **Upload rides (.fit) or .json…** in the Drafting check tab and select
+the JSON file. Files are read and analysed locally; they are not sent anywhere.
+
 ## Import: `.fit` rides
 
-Upload **one `.fit` activity file per rider** — the file the head unit records, or the "original
-file" export from Garmin Connect, Strava, Wahoo, etc. Optionally add **one `.gpx` course file**; it
-provides the course line every rider is projected onto. Without it, the first rider's own track
-(thinned to ~5 m spacing) is used as the course line, and the scenario description says so. A neutral
-course file is better: a rider's track carries that rider's GNSS error.
+Select **one `.fit` activity file per rider** (two or more): the file the head unit records, or the
+"original file" export from Garmin Connect, Strava, Wahoo and similar. Optionally add **one `.gpx`
+course file**, which provides the course line every rider is projected onto. Without it, the first
+rider's own track (thinned to ~5 m spacing) is used as the course line, and the scenario description
+says so. A neutral course file is better, because a rider's track carries that rider's GNSS error.
 
-* From each FIT file, `record` messages with `timestamp`, `position_lat` and `position_long` are read;
-  `gps_accuracy` (metres) is used as the 1-σ horizontal accuracy where the device records it. Where it
+* From each FIT file, `record` messages with `timestamp`, `position_lat` and `position_long` are read.
+  `gps_accuracy` (metres) is used as the 1-σ horizontal accuracy where the device records it; where it
   is missing, the *assumed accuracy* setting is used and the rider is marked "accuracy not reported".
-  Most consumer devices do not record it. For the power screen, `speed`/`enhanced_speed`, `power`,
-  `cadence`, `heart_rate`, `altitude`/`enhanced_altitude` and `distance` are read too; if a file has no
-  speed, it is derived from GPS positions (noisier, and reported).
+  Most consumer devices do not record it.
 * Records without a GPS fix (e.g. indoor sections, tunnels) are skipped and counted as a warning.
 * Rider ids come from the file names (`R01.fit` → `R01`); duplicates get a `-2`, `-3`… suffix.
-* FIT timestamps are absolute UTC, so riders are synchronised by clock. Head-unit clocks are GPS-
-  synchronised; the *timestamp tolerance* setting covers residual misalignment.
-* The FIT container is decoded by a small built-in reader (`backend/vector_pacing/fit.py`): normal and
-  compressed-timestamp headers, developer fields, either byte order and chained files are supported,
-  and the file checksum is verified. Corrupted or truncated files are rejected with a message.
-* Limits: 20 MB per file, 1–200 riders (the GPS check needs at least 2), 500 000 positions in total,
-  24 h per rider. Live tracking integrations are not supported.
+* FIT timestamps are absolute UTC, so riders are synchronised by clock. The *timestamp tolerance*
+  setting covers residual misalignment.
+* The FIT container is decoded in the browser by a small reader
+  ([`frontend/src/engine/fit.ts`](../frontend/src/engine/fit.ts), a port of
+  `backend/vector_pacing/fit.py`). Normal and compressed-timestamp headers, developer fields, either
+  byte order and chained files are supported, and the file checksum is verified. Corrupted or
+  truncated files are rejected with a message.
+* Limits: 20 MB per file, 2–200 riders, 500 000 positions in total, 24 h per rider.
 
+The rides are converted to the `vector-pacing-riders/1` structure above and analysed the same way.
 Examples (regenerate with `backend/scripts/generate_fit_samples.py`):
 * [`samples/drafting_two_riders/`](../samples/drafting_two_riders/) (`A.fit`, `B.fit`, `course.gpx`):
-  positions only, no accuracy recorded.
+  positions only, no accuracy recorded. Expected: one inconclusive interval (B behind A).
 * [`samples/drafting_with_power/`](../samples/drafting_with_power/) (`R01.fit`, `R02.fit`,
-  `course.gpx`): 15 min with power, speed and cadence. R02 sits 5 m behind R01 for 90 s on ~100 W less
-  than its own solo power. Expected: one potential-drafting interval (E001) linked to one power anomaly
-  (P001). `R02.fit` alone shows the single-ride power screen.
+  `course.gpx`): R02 sits 5 m behind R01 for 90 s. Expected: one potential-drafting interval (E001).
+  The files also contain power, which only the Python reference's power screen uses.
 * `samples/drafting_invalid.fit`: a truncated file.
 
-API: `POST /api/drafting/analyze-fit` (multipart: repeated `files`, optional `course`, `settings` as a
-JSON string). Internally the files are converted to the `vector-pacing-riders/1` structure that the
-bundled demo scenario
-([`backend/vector_pacing/data/drafting_demo.json`](../backend/vector_pacing/data/drafting_demo.json))
-uses; `POST /api/drafting/analyze` still accepts that structure for programmatic use.
+The Python reference also accepts a single ride and runs the power screen below on rides with power.
+The browser demo does neither.
 
 ## Method
 
@@ -173,13 +206,12 @@ The report for each interval includes:
   follower position) for 15 s either side
 * a list of data-quality limitations specific to that interval
 
-For `.fit` uploads each interval also lists `power_anomaly_ids`: power anomalies of the follower that
-overlap it in time.
-
 Exports (JSON and CSV) include all of this plus the settings, the illustrative-settings note,
-general limitations, per-rider data quality, the power screen and the disclaimer.
+general limitations, per-rider data quality and the disclaimer.
 
 ## Power screen (within rider)
+
+*Python reference only; not part of the browser demo.*
 
 Ported unchanged from RaceGuard's matched-section evidence model (`raceguard.analysis`; version
 `raceguard-matched-sections-1`). Drafting reduces the aerodynamic power a rider needs for a given
@@ -244,6 +276,6 @@ turnaround exemption:
   riders side by side can't be told from riders in line.
 * The model knows nothing of road layout, obstacles, crashes, marshal instructions, motorbikes or
   vehicles, or other context a commissaire would consider.
-* The GPS check does not estimate the aerodynamic benefit of following. The power screen looks for a
-  power deficit, but cannot separate drafting from wind (see above).
+* The GPS check does not estimate the aerodynamic benefit of following. The power screen (Python
+  reference only) looks for a power deficit, but cannot separate drafting from wind (see above).
 * Thresholds are configurable and the defaults are illustrative. Results depend on them.

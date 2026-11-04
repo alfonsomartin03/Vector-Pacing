@@ -1,4 +1,5 @@
-// Shapes returned by the FastAPI backend (see backend/vector_pacing/api.py). SI units unless named otherwise.
+// Result shapes produced by the in-browser engine (src/engine). They match the former API responses of
+// the Python reference (backend/vector_pacing/api.py). SI units unless named otherwise.
 
 export interface CourseProfile {
   distance_m: number[];
@@ -21,8 +22,6 @@ export interface CourseInfo {
   warnings: string[];
   profile: CourseProfile;
 }
-
-export type CourseRef = { kind: 'demo' } | { kind: 'gpx'; gpx_text: string; filename: string };
 
 export interface ResultSeries {
   distance_m: number[];
