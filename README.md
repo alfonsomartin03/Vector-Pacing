@@ -1,14 +1,20 @@
 # Vector Pacing
 
-**Cycling pacing simulator and optimizer, with a potential-drafting check — v1.0.0 (demonstration release).**
+**Cycling pacing simulator with a potential-drafting check — a static demo that runs entirely in your
+browser (v1.1.0).**
 
-Two independent tools in one local app:
+Live site (after the Pages workflow has run): <https://alfonsomartin03.github.io/Vector-Pacing/>
 
-* **Pacing simulator.** Load a course and describe the rider. Simulate a constant-power ride, let the
-  optimizer propose a variable-power plan, compare the two, and export the result.
-* **Drafting check.** Load timestamped multi-rider positions from an event where drafting is
-  restricted (e.g. an ITT). Review intervals of *potential* drafting on a timeline and course view,
-  adjust the event rules, and export the findings.
+Two independent tools in one page:
+
+* **Pacing simulator.** Load a course and describe the rider. Simulate a constant-power ride, let a
+  simple terrain-aware heuristic propose a variable-power plan, compare the two and export the result.
+* **Drafting check.** Review intervals of *potential* drafting in a multi-rider time-trial scenario
+  on a timeline and course view, adjust the event rules and export the findings.
+
+There is no backend, API server, account or paid service. All calculations run in TypeScript in a
+Web Worker. Demo data is bundled with the site, and files you choose are read locally and never
+uploaded.
 
 > **Model estimates only.** Pacing results come from a simplified steady-state physics model and a
 > CP/W′ balance approximation with the parameters you enter. They are not validated predictions and
@@ -18,99 +24,109 @@ Two independent tools in one local app:
 > estimates and configurable, illustrative settings. They are not confirmed rules violations, and no
 > penalty is implied. See [docs/DRAFTING.md](docs/DRAFTING.md).
 
-## What v1.0 does
+## What the demo does
 
-* **Courses.** A bundled, deterministic demo course (32 km, ~317 m climbing, works offline) or
-  your own GPX upload. Parsing is safe (`defusedxml`) and handles namespaces, multiple track segments,
-  routes, duplicate points and missing elevation. Malformed, empty, zero-length and oversized files
-  get clear error messages.
-* **Physics.** Aero drag, rolling resistance, gravity, drivetrain efficiency and rider + bike mass.
-  Explicit rules for coasting on steep descents, a braking speed limit, stalls and solver failures.
-* **Athlete model.** Critical power and W′ with W′-balance depletion and recovery tracked along the
-  course. Exhaustion is reported as infeasible and the negative balance is shown, not clamped.
-* **Baseline.** Constant power, either picked automatically (the highest feasible constant power) or
-  entered manually. The power used is always shown.
-* **Optimization.** Terrain-aware segments (2–30), power bounds, and W′ ≥ 0 at every step, solved by
-  SLSQP within a fixed compute budget. Each proposed plan is checked again in the same simulator
-  before it is reported. If the gain is negligible or the solver fails, the app says so.
-* **Interface.** Charts of elevation, power, speed and W′ against distance; a summary of time,
-  feasibility and time difference; a per-segment plan table; solver details. The UI includes
-  loading, empty, error, retry, cancel and reset states. Results go stale when inputs change. The
-  layout supports keyboard use and narrow screens.
-* **Export.** Full JSON with inputs, units, versions, summaries, segments and per-step series, plus
-  a per-step CSV that compares the two plans.
-* **Drafting check** (separate from pacing):
-  * **Data.** A bundled deterministic 12-rider ITT scenario, or upload of one `.fit` ride per rider
-    (plus an optional course `.gpx`).
-  * **Detection.** Sustained following within a configurable zone. Lateral separation is used when
-    the position accuracy supports it.
-  * **Power screen** (from [RaceGuard](https://github.com/alfonsomartin03/RaceGuard), merged here).
-    Rides with power are checked for sections where the rider held speed on clearly less power than
-    in their own comparable sections. This works with a single ride, and findings are linked with
-    overlapping GPS intervals.
-  * **Command line.** `vector-pacing-review R01.fit R02.fit --course course.gpx` prints a text
-    report (`--json` for the full report).
-  * **What it tells apart.** Following is distinguished from overtakes, drop-backs, brief
-    encounters, opposite-direction riders, side-by-side riders and nearby separate course sections.
-  * **Data quality.** Missing samples, misaligned timestamps, GNSS uncertainty and insufficient
-    accuracy are accounted for. Low-quality intervals are "inconclusive", not flagged.
-  * **Rules.** Zone length, passing time, drop-back time and exempt sections are configurable.
-    Presets are illustrative only.
-  * **Review and export.** A timeline, a course view and per-interval gap charts with limitations.
-    JSON/CSV export includes the settings and data-quality limitations.
+**Pacing**
 
-## Quick start
+* **Courses:** the bundled demo course (32 km, ~317 m climbing) or any GPX file with a track or
+  route. Missing elevation, duplicate points, multiple segments and malformed files are handled with
+  clear messages.
+* **Rider inputs:** CP, W′, masses, CdA, Crr, drivetrain efficiency, air density, speed limit,
+  coasting threshold, baseline mode (Auto or Manual) and optimizer bounds and segment count.
+* **Constant-power baseline:** the same physics, W′-balance and coasting/speed-limit/stall rules as
+  the original Python model. On the demo course the TypeScript port reproduces the Python results
+  exactly (Auto baseline 286 W, 3125.42 s).
+* **Variable-power plan:** a bounded, browser-friendly heuristic (see below), checked by the same
+  simulator and reported only if it is verified feasible and at least 0.5 s faster.
+* **Comparison and export:** elevation, power, speed and W′ charts; a summary; a per-segment plan
+  table; solver details; full JSON and per-step CSV export.
 
-Requirements: Python ≥ 3.11, Node ≥ 20.19 (with npm), `make`. Runtime needs no network access or
-accounts (installing dependencies does need network).
+**Drafting check**
+
+* The bundled 12-rider illustrative ITT scenario, analysed in the browser. The TypeScript port gives
+  the same intervals, classifications and encounters as the Python reference on this scenario.
+* Configurable zone length, passing and drop-back times, lateral separation, exempt sections and
+  data-quality settings, with illustrative presets.
+* Upload of one `.fit` ride per rider (two or more) plus an optional course `.gpx`, decoded in the
+  browser, or of a `vector-pacing-riders/1` JSON document (example:
+  [`samples/drafting_two_riders.json`](samples/drafting_two_riders.json)). On the `.fit` samples the
+  results match the Python reference.
+* Timeline, course view, per-interval gap chart, dismissed encounters, data quality by rider, and
+  JSON/CSV export.
+
+## Scope reductions in the browser version
+
+Moving from the Python backend to a static site changed the following. The original Python code is
+still in [`backend/`](backend/) as a reference. It is not needed to build or run the demo.
+
+| Area | Before (Python API) | Now (browser) |
+|---|---|---|
+| Pacing optimizer | SciPy SLSQP (gradient-based, constrained) | Bounded two-stage heuristic: grade-proportional seeds, then pairwise power transfers between segments, every candidate fully simulated. Not equivalent to SLSQP: on the demo course it finds a 57.3 s gain where SLSQP found 61.2 s. |
+| Drafting uploads | One or more `.fit` rides plus an optional course `.gpx` | Two or more `.fit` rides (positions only) plus an optional `.gpx`, or one `vector-pacing-riders/1` JSON file. A single ride is no longer accepted, because it was only useful for the power screen. |
+| Power screen (RaceGuard) | Within-rider power anomalies for `.fit` rides with power | Removed: the UI, exports and FIT power decoding. |
+| Command line | `vector-pacing-review` | Only in the Python reference. |
+| Content hashes | SHA-256 | A short non-cryptographic hash, used only to detect changed inputs. |
+
+## Run locally
+
+Requirements: Node ≥ 20.19 with npm. `make` is optional.
 
 ```bash
 make install
 ```
 
-Single-process demo (builds the UI, then serves UI + API):
-
-```bash
-make serve
-```
-
-Open <http://127.0.0.1:8000> and click **Try demo course**, then **Optimize pacing**. For the
-drafting check, open the **Drafting check** tab and click **Try multi-rider demo**.
-
-Development mode (API with reload on :8000, Vite dev server on :5173):
-
 ```bash
 make dev
 ```
 
+Then open <http://127.0.0.1:5173>, click **Try demo course** and then **Optimize pacing**. For the
+drafting check, open the **Drafting check** tab and click **Try multi-rider demo**.
+
 Without `make`:
 
 ```bash
-python3 -m venv backend/.venv && backend/.venv/bin/pip install -e "backend[dev]"
-cd frontend && npm ci && npm run build && cd ..
-backend/.venv/bin/uvicorn vector_pacing.api:app --app-dir backend --port 8000
+cd frontend && npm ci && npm run dev
 ```
 
-## Checks
+## Build and check
 
 ```bash
 make check
 ```
 
-This runs ruff, mypy, pytest, eslint, tsc, vitest and the production build, the same checks as
-[CI](.github/workflows/ci.yml). Run `make test` for tests only.
+This runs ESLint, `tsc`, the Vitest suite and the production build, the same checks the Pages
+workflow runs before deploying. `make test` runs the tests only.
+
+To serve the production build exactly as GitHub Pages will, under `/Vector-Pacing/`:
+
+```bash
+make pages-preview
+```
+
+Then open <http://127.0.0.1:4173/Vector-Pacing/>.
+
+## Deploy to GitHub Pages
+
+1. In the repository's **Settings → Pages**, set **Source** to **GitHub Actions**.
+2. Push to `main`, or run the **Deploy GitHub Pages** workflow by hand.
+
+The workflow ([.github/workflows/pages.yml](.github/workflows/pages.yml)) installs dependencies, runs
+lint, type checks and tests, builds with `VITE_BASE_PATH` set to the repository's Pages path, and
+publishes `frontend/dist`. No secrets, variables or other services are needed. Assets, the bundled
+data and the Web Worker are all loaded relative to that base path, so a custom domain (base `/`) also
+works.
 
 ## Repository layout
 
 ```
-backend/vector_pacing/   course.py · physics.py · athlete.py · simulate.py · optimize.py · api.py
-                         drafting.py · power_screen.py · review.py · fit.py · drafting_api.py · cli.py
-                         (potential-drafting check: GPS following + RaceGuard power screen; independent of pacing)
-backend/vector_pacing/data/   demo_course.gpx · drafting_demo.json  (regenerate with backend/scripts/*.py)
-backend/tests/           pytest: parsing, physics, W′, simulation, optimizer, drafting rules, API
-frontend/src/            React app; drafting UI in src/drafting; vitest tests in src/test
-samples/                 GPX and .fit files for upload testing (incl. deliberately invalid ones)
-docs/                    MODEL.md · DRAFTING.md · ARCHITECTURE.md · DEMO.md · RELEASE_CHECKLIST.md
+frontend/src/engine/     browser engine: course.ts (GPX), simulate.ts (physics, W′, rules),
+                         optimize.ts (heuristic), pacing.ts, drafting.ts, fit.ts (FIT reader),
+                         worker.ts, client.ts
+frontend/src/data/       bundled demo course (GPX) and drafting scenario (JSON)
+frontend/src/            React UI; drafting UI in src/drafting; Vitest tests in src/test
+samples/                 GPX, FIT and JSON files for upload testing (including deliberately invalid ones)
+backend/                 original Python implementation (reference only, not used by the demo)
+docs/                    MODEL.md · DRAFTING.md · ARCHITECTURE.md · DEMO.md
 ```
 
 ## Documentation
@@ -120,59 +136,34 @@ docs/                    MODEL.md · DRAFTING.md · ARCHITECTURE.md · DEMO.md �
 * [Architecture](docs/ARCHITECTURE.md)
 * [Demo script](docs/DEMO.md)
 * [Release notes](RELEASE_NOTES.md)
-* [Release checklist](docs/RELEASE_CHECKLIST.md)
 
 ## Known limitations
 
-**Pacing:**
+**Pacing**
+
 * No wind, drafting benefit, acceleration or inertia.
 * Air density and CP are constant, and W′ recovery is a simple approximation.
-* The optimizer is local and works on segments, so it does not guarantee a global optimum.
+* The plan comes from a local heuristic. It is not guaranteed to be optimal and can differ from the
+  Python reference's SLSQP result.
 * Estimates come without uncertainty bounds.
 
-Details are in [docs/MODEL.md §7](docs/MODEL.md#7-known-limitations).
+**Drafting check**
 
-**Drafting check:**
 * It relies on GNSS positions and the course line.
 * With typical consumer accuracy it cannot tell riders side by side from riders in line.
 * It knows nothing about road context.
 * It does not ship any official rule set.
 
-Details are in [docs/DRAFTING.md](docs/DRAFTING.md#limitations).
+## Python reference (optional)
 
-## Deferred ideas (not part of v1.0)
+The original FastAPI + NumPy/SciPy implementation is kept in `backend/` for comparison: it includes
+the SLSQP optimizer, the RaceGuard power screen and the `vector-pacing-review` command.
+It needs Python ≥ 3.11:
 
-The original concept went further. The following are **not implemented** and are not planned for
-this release:
+```bash
+make reference-install
+```
 
-* Recorded-ride replay, live telemetry and WebSocket streaming (FIT files are read for the drafting
-  check only, not for pacing)
-* Time-series database storage (PostgreSQL/TimescaleDB)
-* Heart rate, cadence and other sensor channels, and Bluetooth/ANT+, Garmin or smart-trainer integration
-* Real-time pacing recommendations during a ride
-* Wind/weather, aerodynamic drafting benefit, pack dynamics, tactical multi-rider optimization and
-  team time-trial simulation (the drafting *check* only detects potential drafting; it does not model
-  its effect)
-* Live rider tracking integrations and named governing-body rule presets
-* Monte Carlo uncertainty, machine-learning fatigue models, automatic CdA estimation
-* Maps, cloud deployment, Docker and accounts
-
-The original motivating question still stands: **can physics, physiology and numerical optimization
-together say how to ride a course as fast as possible?** v1.0 answers it for the offline,
-pre-race planning case and leaves the live-telemetry case unaddressed.
-
-## GitHub Pages
-
-The Pages workflow publishes the frontend on every push to `main`. In repository
-Settings → Pages, select **GitHub Actions** as the source.
-
-GitHub Pages cannot execute the Python backend. Host the backend separately using
-`uvicorn vector_pacing.api:app --host 0.0.0.0 --port 8000` after installing `backend`.
-Provide HTTPS on that host. Set its `VECTOR_PACING_CORS_ORIGINS` environment variable
-to `https://alfonsomartin03.github.io` (no trailing slash or repository path).
-Set the GitHub repository Actions variable `VITE_API_URL` to the backend HTTPS URL
-(no `/api` suffix), then rerun the Pages workflow. This URL is public, not a secret.
-Without it, the frontend displays a setup notice; calculations and uploads require the API.
-
-The workflow derives asset paths from Pages metadata, supporting project subpaths
-and custom domains. Local development and `make serve` keep same-origin API requests.
+```bash
+make reference-test
+```

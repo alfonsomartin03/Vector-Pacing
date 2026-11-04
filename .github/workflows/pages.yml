@@ -1,4 +1,5 @@
 name: Deploy GitHub Pages
+# Static site only: all calculations run in the browser, so no backend or secrets are needed.
 on:
   push:
     branches: [main]
@@ -27,12 +28,11 @@ jobs:
         id: pages
       - run: npm ci
         working-directory: frontend
-      - run: npm run lint && npm test && npm run build
+      - run: npm run lint && npm run typecheck && npm test && npm run build
         working-directory: frontend
         env:
+          # e.g. "/Vector-Pacing/" for a project site, "/" for a custom domain
           VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
-          VITE_PAGES: 'true'
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist

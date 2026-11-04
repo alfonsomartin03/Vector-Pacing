@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError } from '../api';
+import { EngineError, runDrafting } from '../engine/client';
+import { parseGpxPoints } from '../engine/course';
 import { downloadText } from '../export';
-import { analyzeDrafting, fetchPresets } from './api';
 import { CourseMap } from './CourseMap';
 import { EventDetail } from './EventDetail';
-import { PowerScreenCard } from './PowerScreenCard';
+import { PRESETS } from './presets';
 import { buildDraftCsv, buildDraftJson, draftBaseName } from './export';
 import { CLASS_COLOR, CLASS_LABEL, ENC_LABEL, clock, fmtM } from './format';
 import { DFIELDS, formatExempt, formFromSettings, validateDraft, type DForm } from './settings';
 import { Timeline } from './Timeline';
-import type { Classification, DraftingResponse, DraftingSettings, PresetsResponse, ScenarioRef } from './types';
+import type { Classification, DraftingResponse, DraftingSettings, ScenarioRef } from './types';
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const ORDER: Classification[] = ['potential_drafting', 'inconclusive', 'overtake', 'drop_back', 'brief_encounter', 'exempt'];
@@ -21,15 +21,37 @@ type Run =
   | { status: 'done'; key: string; data: DraftingResponse };
 
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
-const msg = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : 'Unexpected error.');
-const scenarioId = (s: ScenarioRef | null) =>
-  s ? (s.kind === 'demo' ? 'demo' : `upload:${[...s.riders, ...(s.course ? [s.course] : [])].map((f) => `${f.name}:${f.size}:${f.lastModified}`).join('|')}`) : null;
+const msg = (e: unknown) => (e instanceof EngineError || e instanceof Error ? e.message : 'Unexpected error.');
+const fileId = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+const scenarioId = (s: ScenarioRef | null) => {
+  if (!s) return null;
+  if (s.kind === 'demo') return 'demo';
+  if (s.kind === 'upload') return `upload:${fileId(s.file)}`;
+  return `fit:${[...s.riders, ...(s.course ? [s.course] : [])].map(fileId).join('|')}`;
+};
+
+/** Runs the analysis in the browser engine (Web Worker). Uploaded files are read locally. */
+async function analyzeDrafting(sc: ScenarioRef, settings: DraftingSettings, signal: AbortSignal): Promise<DraftingResponse> {
+  if (sc.kind === 'demo') return runDrafting({ kind: 'demo' }, settings, signal);
+  if (sc.kind === 'upload') return runDrafting({ kind: 'upload', text: await sc.file.text(), filename: sc.file.name }, settings, signal);
+  let course = null;
+  if (sc.course) {
+    // GPX needs DOMParser, which workers lack, so the course line is parsed here.
+    try {
+      const { name, points } = parseGpxPoints(await sc.course.text());
+      course = { filename: sc.course.name, name, points: points.map((p): [number, number] => [p.lat, p.lon]) };
+    } catch (e) {
+      throw new EngineError(`${sc.course.name}: ${msg(e)}`);
+    }
+  }
+  const riders = await Promise.all(sc.riders.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
+  return runDrafting({ kind: 'fit', riders, course }, settings, signal);
+}
 
 export function DraftingView() {
-  const [presets, setPresets] = useState<PresetsResponse | null>(null);
-  const [presetError, setPresetError] = useState<string | null>(null);
+  const presets = PRESETS;
   const [scenario, setScenario] = useState<ScenarioRef | null>(null);
-  const [form, setForm] = useState<DForm | null>(null);
+  const [form, setForm] = useState<DForm>(() => formFromSettings(PRESETS.defaults));
   const [presetKey, setPresetKey] = useState('custom');
   const [run, setRun] = useState<Run>({ status: 'idle' });
   const [last, setLast] = useState<Extract<Run, { status: 'done' }> | null>(null);
@@ -39,30 +61,9 @@ export function DraftingView() {
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [presetAttempt, setPresetAttempt] = useState(0);
-
-  useEffect(() => {
-    let alive = true;
-    fetchPresets()
-      .then((p) => {
-        if (!alive) return;
-        setPresets(p);
-        setForm((f) => f ?? formFromSettings(p.defaults));
-      })
-      .catch((e: unknown) => {
-        if (alive) setPresetError(msg(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [presetAttempt]);
-
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const { errors, settings } = useMemo(
-    () => (form ? validateDraft(form) : { errors: {}, settings: null }),
-    [form],
-  );
+  const { errors, settings } = useMemo(() => validateDraft(form), [form]);
   const currentKey = settings && scenario ? JSON.stringify({ s: scenarioId(scenario), settings }) : null;
   const result = last?.data ?? null;
   const stale = last !== null && last.key !== currentKey;
@@ -87,7 +88,6 @@ export function DraftingView() {
   }, []);
 
   const startDemo = () => {
-    if (!presets || !form) return;
     const nextForm = { ...form, exempt: form.exempt.trim() ? form.exempt : formatExempt(presets.demo_exempt_sections) };
     setForm(nextForm);
     setScenario({ kind: 'demo' });
@@ -99,16 +99,22 @@ export function DraftingView() {
 
   const onFiles = (files: File[]) => {
     setUploadError(null);
-    const riders = files.filter((f) => /\.fit$/i.test(f.name));
-    const courses = files.filter((f) => /\.gpx$/i.test(f.name));
-    const other = files.filter((f) => !riders.includes(f) && !courses.includes(f));
-    if (other.length) return setUploadError(`"${other[0]!.name}" is not a .fit or .gpx file.`);
-    if (riders.length < 1) return setUploadError('Select at least one .fit file (one per rider).');
-    if (courses.length > 1) return setUploadError('Select at most one .gpx course file.');
     const big = files.find((f) => f.size > MAX_UPLOAD_BYTES);
     if (big) return setUploadError(`"${big.name}" is larger than 20 MB.`);
-    const course = courses[0] ?? null;
-    const sc: ScenarioRef = { kind: 'upload', riders, course };
+    const json = files.filter((f) => /\.json$/i.test(f.name));
+    const fits = files.filter((f) => /\.fit$/i.test(f.name));
+    const gpx = files.filter((f) => /\.gpx$/i.test(f.name));
+    const other = files.find((f) => !json.includes(f) && !fits.includes(f) && !gpx.includes(f));
+    if (other) return setUploadError(`"${other.name}" is not a .fit, .gpx or .json file.`);
+    let sc: ScenarioRef;
+    if (json.length) {
+      if (files.length > 1) return setUploadError('Select either one .json file, or .fit rides with an optional course .gpx — not both.');
+      sc = { kind: 'upload', file: json[0]! };
+    } else {
+      if (fits.length < 2) return setUploadError('Select at least two .fit files (one per rider).');
+      if (gpx.length > 1) return setUploadError('Select at most one .gpx course file.');
+      sc = { kind: 'fit', riders: fits, course: gpx[0] ?? null };
+    }
     setScenario(sc);
     setLast(null);
     if (settings) void execute(sc, settings);
@@ -116,8 +122,8 @@ export function DraftingView() {
 
   const applyPreset = (key: string) => {
     setPresetKey(key);
-    const p = presets?.presets[key];
-    if (!p || !form) return;
+    const p = presets.presets[key];
+    if (!p) return;
     setForm({
       ...form,
       values: { ...form.values, ...Object.fromEntries(Object.entries(p.settings).map(([k, v]) => [k, String(v)])) },
@@ -132,7 +138,7 @@ export function DraftingView() {
     setSelectedId(null);
     setUploadError(null);
     setPresetKey('custom');
-    if (presets) setForm(formFromSettings(presets.defaults));
+    setForm(formFromSettings(presets.defaults));
   };
 
   const doExport = (kind: 'json' | 'csv') => {
@@ -146,27 +152,6 @@ export function DraftingView() {
     ? result.events.filter((e) => showAll || e.classification === 'potential_drafting' || e.classification === 'inconclusive')
     : [];
   const selected = result?.events.find((e) => e.id === selectedId) ?? null;
-
-  if (presetError) {
-    return (
-      <section className="panel">
-        <div className="alert alert-error" role="alert">
-          <p>Could not load drafting settings: {presetError}</p>
-          <button
-            type="button"
-            className="btn btn-small"
-            onClick={() => {
-              setPresetError(null);
-              setPresetAttempt((n) => n + 1);
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      </section>
-    );
-  }
-  if (!presets || !form) return <p className="status">Loading drafting settings…</p>;
 
   return (
     <>
@@ -182,12 +167,12 @@ export function DraftingView() {
           </button>
           <span className="or">or</span>
           <label className={`btn btn-secondary file-btn${running ? ' is-disabled' : ''}`}>
-            Upload rides (.fit)…
+            Upload rides (.fit) or .json…
             <input
               ref={fileRef}
               type="file"
               multiple
-              accept=".fit,.gpx"
+              accept=".fit,.gpx,.json"
               className="visually-hidden-input"
               disabled={running}
               onClick={(e) => {
@@ -206,17 +191,17 @@ export function DraftingView() {
           )}
         </div>
         <p className="help">
-          Select one <code>.fit</code> activity per rider (as recorded by the head unit or exported from Garmin
-          Connect, Strava, Wahoo…), plus optionally the course <code>.gpx</code>. Two or more rides enable the GPS
-          following check; rides with power are also screened against the rider&apos;s own comparable sections (works
-          with a single ride). Without a course file the first rider&apos;s track is used as the course line. See
-          docs/DRAFTING.md.
+          Select one <code>.fit</code> activity per rider (two or more), plus optionally the course <code>.gpx</code>.
+          Without a course file the first rider&apos;s track is used as the course line. Alternatively, select one{' '}
+          <code>.json</code> file in the <code>vector-pacing-riders/1</code> format (see docs/DRAFTING.md). Files are
+          read and analysed in your browser; nothing is uploaded to a server. The power screen of the Python version
+          is not part of this browser demo.
         </p>
         {uploadError && (
           <div className="alert alert-error" role="alert">
             <p>{uploadError}</p>
             <button type="button" className="btn btn-small" onClick={() => fileRef.current?.click()}>
-              Choose other files
+              Choose another file
             </button>
           </div>
         )}
@@ -355,7 +340,7 @@ export function DraftingView() {
                     </button>
                     {scenario.kind === 'upload' && (
                       <button type="button" className="btn btn-small" onClick={() => fileRef.current?.click()}>
-                        Choose other files
+                        Choose another file
                       </button>
                     )}
                   </div>
@@ -477,18 +462,6 @@ export function DraftingView() {
                     event={selected}
                     zoneLength={result.meta.settings.zone_length_m}
                     startTime={result.scenario.start_time}
-                    powerAnomalies={result.power_screen?.anomalies.filter((a) => selected.power_anomaly_ids.includes(a.id)) ?? []}
-                  />
-                )}
-
-                {result.power_screen && (
-                  <PowerScreenCard
-                    screen={result.power_screen}
-                    startTime={result.scenario.start_time}
-                    onSelectEvent={(id) => {
-                      setShowAll(true);
-                      setSelectedId(id);
-                    }}
                   />
                 )}
 

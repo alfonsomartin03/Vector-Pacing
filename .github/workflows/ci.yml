@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  backend:
+  # The demo is the static frontend. The Python package is kept only as a reference implementation.
+  python-reference:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -54,5 +55,7 @@ jobs:
         run: npm run typecheck
       - name: Tests (vitest)
         run: npm test
-      - name: Production build
+      - name: Production build (GitHub Pages subpath)
         run: npm run build
+        env:
+          VITE_BASE_PATH: /Vector-Pacing/

@@ -1,6 +1,33 @@
 # Release notes
 
-## Unreleased
+## 1.1.0 — browser-only GitHub Pages demo
+
+The demo now runs entirely in the browser and deploys to GitHub Pages as a static site. No backend,
+API server, account or paid service is needed.
+
+* **Browser engine.** Course parsing, physics, W′ balance, the constant-power baseline, the drafting
+  GPS check and the FIT position reader were ported to TypeScript (`frontend/src/engine/`) and run in
+  a Web Worker. On the bundled data the port reproduces the Python results: the demo course Auto
+  baseline is 286 W and 3125.42 s, the 12-rider drafting scenario gives identical intervals and
+  encounters, and the `.fit` samples give the same intervals.
+* **New optimizer.** SciPy SLSQP is replaced by a bounded two-stage heuristic: grade-proportional
+  seeds, then W′-aware pairwise power transfers. Every candidate is fully simulated, and the final plan
+  is verified independently. It is simpler and not equivalent to SLSQP: on the demo course it finds
+  57.3 s where SLSQP found 61.2 s. The model id is now `vp-model-1.0+web-heuristic-1`.
+* **Removed from the demo.** The RaceGuard power screen (UI, exports, FIT power decoding) and
+  single-ride `.fit` uploads, which only the power screen used. Drafting uploads still take two or
+  more `.fit` rides plus an optional `.gpx`, and now also a `vector-pacing-riders/1` JSON file (new
+  sample: `samples/drafting_two_riders.json`).
+* **Deployment.** The external API URL, the API setup notice, the CORS option and the dev-server API
+  proxy are gone. The Pages workflow runs lint, type checks, tests and the build, then publishes
+  `frontend/dist` under the repository's Pages path.
+* **Python reference.** `backend/` is kept unchanged as a reference implementation. It is not needed
+  to build or run the demo; `make reference-install` and `make reference-test` still work.
+* **Tests.** New focused engine tests (parsing edge cases, physics, W′, simulation rules, optimizer
+  honesty rules and budget, drafting parity and validation) and a worker-client test. The UI tests now
+  run against the real engine and assert that no network requests are made.
+
+## Unreleased (pre-1.1, Python backend)
 
 * **RaceGuard merged in.** [RaceGuard](https://github.com/alfonsomartin03/RaceGuard) is merged into
   this repository with its history. Its within-rider power model is now the drafting check's **power

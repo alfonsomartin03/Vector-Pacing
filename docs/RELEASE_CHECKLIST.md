@@ -1,5 +1,8 @@
 # v1.0.0 release checklist
 
+> Historical: this checklist is for the v1.0.0 Python-backed release. Since v1.1.0 the demo is a
+> static browser app; see the README for current checks (`make check`, `make pages-preview`).
+
 Evidence recorded 2026-11-03 on macOS (Python 3.14.6, Node 24.18.0). "Fresh copy" = the working tree
 copied without `.venv`, `node_modules`, `dist` or caches, then `make install && make check`.
 

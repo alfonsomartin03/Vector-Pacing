@@ -1,14 +1,12 @@
 import { useMemo } from 'react';
 import { Area, ComposedChart, CartesianGrid, Legend, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { DraftEvent, PowerAnomaly } from './types';
+import type { DraftEvent } from './types';
 import { CLASS_COLOR, CLASS_LABEL, clock, fmtM } from './format';
 
 interface Props {
   event: DraftEvent;
   zoneLength: number;
   startTime: string | null;
-  /** Power-screen anomalies of the follower that overlap this interval. */
-  powerAnomalies?: PowerAnomaly[];
 }
 
 const ENDED: Record<string, string> = {
@@ -18,7 +16,7 @@ const ENDED: Record<string, string> = {
   data_unavailable: 'Usable data stopped (dropout or end of track)',
 };
 
-export function EventDetail({ event: e, zoneLength, startTime, powerAnomalies = [] }: Props) {
+export function EventDetail({ event: e, zoneLength, startTime }: Props) {
   const rows = useMemo(
     () =>
       e.series.t_s.map((t, i) => {
@@ -76,17 +74,6 @@ export function EventDetail({ event: e, zoneLength, startTime, powerAnomalies = 
         <dt>Course position</dt>
         <dd>
           {e.course_start_m === null ? '—' : `${(e.course_start_m / 1000).toFixed(2)}–${((e.course_end_m ?? 0) / 1000).toFixed(2)} km`}
-        </dd>
-        <dt>Power screen ({e.follower})</dt>
-        <dd>
-          {powerAnomalies.length
-            ? powerAnomalies
-                .map(
-                  (a) =>
-                    `${a.id}: ${a.average_power_w === null ? '—' : Math.round(a.average_power_w)} W vs ${Math.round(a.reference_power_w)} W own reference (−${Math.round(a.deficit_w)} W) at ${clock(a.start_s, startTime)}`,
-                )
-                .join('; ')
-            : 'no overlapping power anomaly'}
         </dd>
       </dl>
       <figure className="chart">
