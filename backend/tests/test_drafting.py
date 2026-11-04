@@ -18,7 +18,7 @@ from vector_pacing.drafting import (
     load_demo_scenario,
     parse_scenario,
 )
-from vector_pacing.drafting_api import scenario_from_fit
+from vector_pacing.review import scenario_from_fit
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 M = 111_195.0
@@ -143,7 +143,7 @@ def fit_files(course: bool = True) -> list[tuple[str, tuple[str, bytes]]]:
 
 def test_fit_sample_times_and_missing_accuracy():
     files = [(name, data) for key, (name, data) in fit_files(course=False)]
-    sc = scenario_from_fit(files, None)
+    sc = scenario_from_fit(files, None).scenario
     assert sc.start_time == "2026-07-01T09:00:00Z"
     assert [r.id for r in sc.riders] == ["A", "B"]
     assert sc.riders[0].t[0] == 0.0
@@ -419,7 +419,7 @@ def test_api_fit_upload_and_settings_change():
 @pytest.mark.parametrize(
     ("files", "data", "fragment"),
     [
-        ([("files", ("A.fit", b""))], {}, "at least two .fit files"),
+        ([("files", ("A.fit", b""))], {}, "the file is empty"),
         ([("files", ("A.fit", b"x")), ("files", ("B.json", b"{}"))], {}, "is not a .fit file"),
         (None, {"settings": '{"zone_length_m": 0}'}, "settings.zone_length_m"),
         ("invalid", {}, "truncated"),
@@ -452,3 +452,33 @@ def test_api_invalid_document():
     document = {"format": "vector-pacing-riders/1", "course": {"points": [[47, 8]]}, "riders": []}
     r = client.post("/api/drafting/analyze", json={"scenario": {"kind": "upload", "document": document}})
     assert r.status_code == 422 and r.json()["kind"] == "scenario_error"
+
+
+def test_api_fit_upload_with_power_links_gps_and_power_evidence():
+    d = SAMPLES / "drafting_with_power"
+    files = [("files", (n, (d / n).read_bytes())) for n in ("R01.fit", "R02.fit")]
+    files.append(("course", ("course.gpx", (d / "course.gpx").read_bytes())))
+    r = client.post("/api/drafting/analyze-fit", files=files).json()
+    assert r["counts"] == {"potential_drafting": 1}
+    ev = r["events"][0]
+    ps = r["power_screen"]
+    assert [a["rider"] for a in ps["anomalies"]] == ["R02"]
+    a = ps["anomalies"][0]
+    assert ev["power_anomaly_ids"] == [a["id"]] and a["gps_event_ids"] == [ev["id"]]
+    assert a["reference_power_w"] - a["average_power_w"] > 60
+    assert {x["id"]: x["has_power"] for x in ps["riders"]} == {"R01": True, "R02": True}
+
+
+def test_api_single_fit_ride_gets_power_screen_only():
+    d = SAMPLES / "drafting_with_power"
+    r = client.post("/api/drafting/analyze-fit", files=[("files", ("R02.fit", (d / "R02.fit").read_bytes()))])
+    body = r.json()
+    assert r.status_code == 200 and body["counts"] == {} and body["events"] == []
+    assert "Only one ride" in body["scenario"]["description"]
+    assert len(body["power_screen"]["anomalies"]) == 1
+
+
+def test_demo_has_no_power_screen():
+    body = client.post("/api/drafting/analyze", json={"scenario": {"kind": "demo"}}).json()
+    assert body["power_screen"] is None
+    assert all(e["power_anomaly_ids"] == [] for e in body["events"])

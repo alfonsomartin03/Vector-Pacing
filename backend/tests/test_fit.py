@@ -64,3 +64,20 @@ def test_big_endian_compressed_timestamps_and_developer_fields():
 def test_invalid_files(data, fragment):
     with pytest.raises(ScenarioError, match=fragment):
         read_fit(data, "x.fit")
+
+
+def test_telemetry_fields_round_trip():
+    tele = [
+        {"speed_mps": 12.345, "power_w": 250.0 + i, "cadence_rpm": 90.0, "heart_rate_bpm": 150.0,
+         "altitude_m": 412.4, "distance_m": 12.34 * i}
+        for i in range(10)
+    ]  # fmt: skip
+    tele[3]["power_w"] = None
+    tr = read_fit(write_fit(SAMPLES, tele))
+    assert tr.has_power
+    assert tr.speed_mps[0] == pytest.approx(12.345)
+    assert tr.power_w[3] is None and tr.power_w[4] == 254.0
+    assert tr.cadence_rpm[0] == 90.0 and tr.heart_rate_bpm[0] == 150.0
+    assert tr.altitude_m[0] == pytest.approx(412.4)
+    assert tr.distance_m[9] == pytest.approx(111.06)
+    assert not read_fit(write_fit(SAMPLES)).has_power
