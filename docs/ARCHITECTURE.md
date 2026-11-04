@@ -13,12 +13,21 @@ backend/vector_pacing/api.py        FastAPI transport: validation (pydantic), er
    └── optimize.py  terrain segments + SLSQP + verification
 
 backend/vector_pacing/drafting_api.py   /api/drafting/* router (separate from pacing)
-   └── drafting.py  rider-position import, course projection, synchronisation,
-                    zone test, interval classification, dismissed encounters
+backend/vector_pacing/cli.py            vector-pacing-review command (same report as the API)
+   └── review.py        .fit upload → scenario + both checks; links power anomalies with GPS intervals
+        ├── fit.py           FIT container reader (positions, speed, power, cadence, altitude…)
+        ├── drafting.py      GPS following check: course projection, synchronisation,
+        │                    zone test, interval classification, dismissed encounters
+        └── power_screen.py  within-rider power screen (ported from RaceGuard)
 ```
 
-* **Drafting is independent.** `drafting.py` imports nothing from the pacing modules and vice
-  versa. The two tabs in the UI share only the shell, styles and download helper.
+* **Drafting is independent.** The drafting modules import nothing from the pacing modules except
+  GPX parsing and `haversine_m` from `course.py`, and pacing imports nothing from drafting. The two
+  tabs in the UI share only the shell, styles and download helper.
+* **RaceGuard.** The RaceGuard repository was merged with its history (`git log -- raceguard/`
+  shows it up to the merge). Its power model lives on in `power_screen.py`. Its GPS trailing
+  detector, CSV import, HTML dashboard, `fitparse` dependency and Vercel config were not carried over:
+  the drafting check, `fit.py` and the React UI replace them.
 
 * **Domain vs transport.** `course`, `physics`, `athlete`, `simulate` and `optimize` have no web
   dependencies and are tested directly. `api.py` only maps HTTP ↔ domain objects.
@@ -27,7 +36,8 @@ backend/vector_pacing/drafting_api.py   /api/drafting/* router (separate from pa
 * **Endpoints:** `GET /api/health`, `GET /api/defaults`, `GET /api/courses/demo`,
   `POST /api/courses/parse` (multipart), `POST /api/simulate`, `POST /api/optimize`,
   `GET /api/drafting/presets`, `POST /api/drafting/analyze` (scenario `{"kind":"demo"}` or
-  `{"kind":"upload","document":{...}}` plus settings).
+  `{"kind":"upload","document":{...}}` plus settings), `POST /api/drafting/analyze-fit` (multipart
+  `.fit` files, optional course `.gpx`, settings JSON; response adds `power_screen`).
   Interactive docs at `/docs` when the server runs.
 * **Errors.** Invalid input → 422 `{"detail": "...", "kind": "validation_error"}`; bad course →
   `course_error`; physics solver failure → `simulation_error`; invalid rider-position document →

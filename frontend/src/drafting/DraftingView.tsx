@@ -4,6 +4,7 @@ import { downloadText } from '../export';
 import { analyzeDrafting, fetchPresets } from './api';
 import { CourseMap } from './CourseMap';
 import { EventDetail } from './EventDetail';
+import { PowerScreenCard } from './PowerScreenCard';
 import { buildDraftCsv, buildDraftJson, draftBaseName } from './export';
 import { CLASS_COLOR, CLASS_LABEL, ENC_LABEL, clock, fmtM } from './format';
 import { DFIELDS, formatExempt, formFromSettings, validateDraft, type DForm } from './settings';
@@ -102,7 +103,7 @@ export function DraftingView() {
     const courses = files.filter((f) => /\.gpx$/i.test(f.name));
     const other = files.filter((f) => !riders.includes(f) && !courses.includes(f));
     if (other.length) return setUploadError(`"${other[0]!.name}" is not a .fit or .gpx file.`);
-    if (riders.length < 2) return setUploadError('Select at least two .fit files (one per rider).');
+    if (riders.length < 1) return setUploadError('Select at least one .fit file (one per rider).');
     if (courses.length > 1) return setUploadError('Select at most one .gpx course file.');
     const big = files.find((f) => f.size > MAX_UPLOAD_BYTES);
     if (big) return setUploadError(`"${big.name}" is larger than 20 MB.`);
@@ -206,8 +207,10 @@ export function DraftingView() {
         </div>
         <p className="help">
           Select one <code>.fit</code> activity per rider (as recorded by the head unit or exported from Garmin
-          Connect, Strava, Wahoo…), plus optionally the course <code>.gpx</code>. Without a course file the first
-          rider&apos;s track is used as the course line. See docs/DRAFTING.md.
+          Connect, Strava, Wahoo…), plus optionally the course <code>.gpx</code>. Two or more rides enable the GPS
+          following check; rides with power are also screened against the rider&apos;s own comparable sections (works
+          with a single ride). Without a course file the first rider&apos;s track is used as the course line. See
+          docs/DRAFTING.md.
         </p>
         {uploadError && (
           <div className="alert alert-error" role="alert">
@@ -469,7 +472,25 @@ export function DraftingView() {
                   </table>
                 </div>
 
-                {selected && <EventDetail event={selected} zoneLength={result.meta.settings.zone_length_m} startTime={result.scenario.start_time} />}
+                {selected && (
+                  <EventDetail
+                    event={selected}
+                    zoneLength={result.meta.settings.zone_length_m}
+                    startTime={result.scenario.start_time}
+                    powerAnomalies={result.power_screen?.anomalies.filter((a) => selected.power_anomaly_ids.includes(a.id)) ?? []}
+                  />
+                )}
+
+                {result.power_screen && (
+                  <PowerScreenCard
+                    screen={result.power_screen}
+                    startTime={result.scenario.start_time}
+                    onSelectEvent={(id) => {
+                      setShowAll(true);
+                      setSelectedId(id);
+                    }}
+                  />
+                )}
 
                 <details className="solver">
                   <summary>

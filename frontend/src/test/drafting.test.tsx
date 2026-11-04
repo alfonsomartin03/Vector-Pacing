@@ -4,7 +4,7 @@ import App from '../App';
 import { buildDraftCsv, buildDraftJson } from '../drafting/export';
 import { clock } from '../drafting/format';
 import { formFromSettings, parseExempt, validateDraft } from '../drafting/settings';
-import { draftingResponse, presets } from './draftingFixtures';
+import { draftingResponse, fitResponse, presets } from './draftingFixtures';
 
 describe('drafting settings', () => {
   it('parses exempt sections and reports bad lines', () => {
@@ -53,6 +53,14 @@ describe('drafting export', () => {
     expect(lines).toHaveLength(4 + 2);
     expect(lines[4]).toMatch(/^E001,R02,R01,potential_drafting,08:01:41 UTC/);
     expect(lines[4]).toMatch(/"Combined gap uncertainty/);
+  });
+  it('CSV and JSON include the power screen when present', () => {
+    const lines = buildDraftCsv(fitResponse).trim().split('\n');
+    expect(lines[4]).toMatch(/,P001,"Combined/);
+    expect(lines.some((l) => l.startsWith('# Power screen (within rider'))).toBe(true);
+    expect(lines.at(-1)).toMatch(/^P001,R02,08:01:45 UTC,08:02:35 UTC,.*,E001$/);
+    expect(JSON.parse(buildDraftJson(fitResponse, new Date())).power_screen.anomalies[0].id).toBe('P001');
+    expect(JSON.parse(buildDraftJson(draftingResponse, new Date())).power_screen).toBeNull();
   });
 });
 
@@ -145,8 +153,8 @@ describe('drafting view', () => {
     const fit = (name: string) => new File([new Uint8Array([14, 0x20])], name);
     fireEvent.change(input, { target: { files: [fit('a.fit'), new File(['{}'], 'riders.json')] } });
     expect(await screen.findByText(/"riders.json" is not a .fit or .gpx file/)).toBeInTheDocument();
-    fireEvent.change(input, { target: { files: [fit('a.fit')] } });
-    expect(await screen.findByText(/at least two .fit files/)).toBeInTheDocument();
+    fireEvent.change(input, { target: { files: [new File(['<gpx/>'], 'course.gpx')] } });
+    expect(await screen.findByText(/at least one .fit file/)).toBeInTheDocument();
     fireEvent.change(input, { target: { files: [fit('a.fit'), fit('bad.fit'), new File(['<gpx/>'], 'course.gpx')] } });
     expect(await screen.findByText(/FIT file is truncated/)).toBeInTheDocument();
     const [url, init] = fetchMock.mock.calls.at(-1)!;
@@ -157,6 +165,33 @@ describe('drafting view', () => {
     expect(JSON.parse(String(body.get('settings'))).zone_length_m).toBe(10);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByText('Fixture scenario')).toBeInTheDocument());
+  });
+
+  it('shows the power screen for .fit uploads and links it with the GPS interval', async () => {
+    mockApi(() => ({ status: 200, body: fitResponse }));
+    const user = await openDrafting();
+    await screen.findByRole('button', { name: 'Try multi-rider demo' });
+    const input = document.querySelector('#panel-drafting input[type=file]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array([14])], 'R02.fit')] } });
+    expect(await screen.findByRole('heading', { name: 'Power screen (within rider)' })).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: /Power anomalies \(1\) — 2 of 3 riders with power/ });
+    expect(within(table).getByText(/269 W vs 367 W \(−98 W, 146 sections\)/)).toBeInTheDocument();
+    expect(screen.getByText(/R03: No power recorded/)).toBeInTheDocument();
+    // E001 is auto-selected; its detail shows the overlapping power anomaly.
+    expect(screen.getByText(/P001: 269 W vs 367 W own reference/)).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/Show non-flagged intervals/));
+    await user.click(screen.getByRole('button', { name: 'Inspect E002' }));
+    expect(screen.getByText('no overlapping power anomaly')).toBeInTheDocument();
+    await user.click(within(table).getByRole('button', { name: 'Inspect E001' }));
+    expect(screen.getByRole('heading', { name: /E001: R02 behind R01/ })).toBeInTheDocument();
+  });
+
+  it('hides the power screen for the demo (no power data)', async () => {
+    mockApi();
+    const user = await openDrafting();
+    await user.click(await screen.findByRole('button', { name: 'Try multi-rider demo' }));
+    await screen.findByText('Fixture scenario');
+    expect(screen.queryByRole('heading', { name: 'Power screen (within rider)' })).not.toBeInTheDocument();
   });
 
   it('keeps pacing and drafting tabs independent and keyboard switchable', async () => {

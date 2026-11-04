@@ -80,6 +80,39 @@ export interface DraftEvent {
   course_end_m: number | null;
   limitations: string[];
   series: EventSeries;
+  /** Power-screen anomalies (same follower) overlapping this interval. */
+  power_anomaly_ids: string[];
+}
+
+/** Within-rider power screen (ported from RaceGuard). Present for .fit uploads only. */
+export interface PowerAnomaly {
+  id: string;
+  rider: string;
+  start_s: number;
+  end_s: number;
+  duration_s: number;
+  score: number;
+  power_score: number;
+  duration_score: number;
+  average_speed_kmh: number;
+  average_power_w: number | null;
+  reference_power_w: number;
+  deficit_w: number;
+  peer_count: number;
+  speed_normalised: boolean;
+  heading_deg: number | null;
+  lat: number;
+  lon: number;
+  distance_m: number | null;
+  notes: string[];
+  gps_event_ids: string[];
+}
+
+export interface PowerScreen {
+  version: string;
+  note: string;
+  riders: { id: string; has_power: boolean; speed_from_gps: boolean; anomaly_count: number; warnings: string[] }[];
+  anomalies: PowerAnomaly[];
 }
 
 export interface Encounter {
@@ -136,6 +169,7 @@ export interface DraftingResponse {
   events: DraftEvent[];
   encounters: Encounter[];
   encounter_counts: Partial<Record<EncounterType, number>>;
+  power_screen: PowerScreen | null;
 }
 
 /** Uploaded rides: one .fit activity per rider, plus an optional course line (.gpx). */

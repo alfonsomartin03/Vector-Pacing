@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+* **RaceGuard merged in.** [RaceGuard](https://github.com/alfonsomartin03/RaceGuard) is merged into
+  this repository with its history. Its within-rider power model is now the drafting check's **power
+  screen** (`backend/vector_pacing/power_screen.py`). It flags sections where a rider held speed on
+  clearly less power than in their own comparable sections. It runs on every uploaded `.fit` ride
+  with power, including a single ride, and its anomalies are linked with overlapping GPS intervals in
+  the UI, exports and API (`power_screen`, `power_anomaly_ids`). Output matches RaceGuard's on
+  identical input, and its power tests are ported. RaceGuard's GPS trailing detector is superseded by
+  the existing following check. Its CSV import, HTML dashboard, `fitparse` dependency and Vercel
+  config were not carried over.
+* **Command line.** `vector-pacing-review` (installed with the backend) prints or writes the same
+  review as text or JSON.
+* **FIT reader** also reads speed, power, cadence, heart rate, altitude and distance.
+* New sample `samples/drafting_with_power/`, where both kinds of evidence agree.
+
 * **Drafting check: `.fit` uploads.** Upload one `.fit` activity per rider (plus an optional course
   `.gpx`) instead of the `vector-pacing-riders/1` JSON document. FIT files are decoded by a built-in
   reader (no new dependency); `gps_accuracy` is used where recorded. The JSON structure remains

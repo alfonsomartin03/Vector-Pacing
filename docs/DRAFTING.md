@@ -5,12 +5,34 @@ such as individual time trials and non-drafting triathlon bike legs. It reports 
 for a person to review. It **does not** confirm a rules violation, and it never issues or suggests
 penalties.
 
-The drafting check is independent of the pacing simulator and optimizer. It does not estimate
-aerodynamic benefit and does not model pack dynamics or multi-rider tactics.
+It combines two independent kinds of evidence:
 
-Code: [`backend/vector_pacing/drafting.py`](../backend/vector_pacing/drafting.py) (domain),
+* **GPS following check** (two or more riders): sustained following inside a configurable zone,
+  described below.
+* **Within-rider power screen** (any rider whose `.fit` file has power, even a single ride): sections
+  where the rider held speed on clearly less power than in their own comparable sections. It comes
+  from [RaceGuard](https://github.com/alfonsomartin03/RaceGuard), merged into this repository; see
+  [Power screen](#power-screen-within-rider). Where both kinds of evidence overlap in time for the
+  same rider, they are linked in the report.
+
+The drafting check is independent of the pacing simulator and optimizer. It does not model pack
+dynamics or multi-rider tactics.
+
+Code: [`backend/vector_pacing/drafting.py`](../backend/vector_pacing/drafting.py) (GPS check),
+[`power_screen.py`](../backend/vector_pacing/power_screen.py) (power screen),
+[`review.py`](../backend/vector_pacing/review.py) (`.fit` upload → both checks),
 [`drafting_api.py`](../backend/vector_pacing/drafting_api.py) (HTTP),
+[`cli.py`](../backend/vector_pacing/cli.py) (command line),
 [`frontend/src/drafting/`](../frontend/src/drafting) (UI).
+
+Command line (installed with the backend):
+
+```bash
+vector-pacing-review samples/drafting_with_power/R01.fit samples/drafting_with_power/R02.fit --course samples/drafting_with_power/course.gpx
+```
+
+Add `--json` for the full JSON report, `--output FILE` to write it to a file and `--settings '{"zone_length_m": 12}'`
+to change detection settings. The exit status is 2 for unreadable input.
 
 ## Rules are configurable, not universal
 
@@ -57,7 +79,9 @@ course file is better: a rider's track carries that rider's GNSS error.
 * From each FIT file, `record` messages with `timestamp`, `position_lat` and `position_long` are read;
   `gps_accuracy` (metres) is used as the 1-σ horizontal accuracy where the device records it. Where it
   is missing, the *assumed accuracy* setting is used and the rider is marked "accuracy not reported".
-  Most consumer devices do not record it.
+  Most consumer devices do not record it. For the power screen, `speed`/`enhanced_speed`, `power`,
+  `cadence`, `heart_rate`, `altitude`/`enhanced_altitude` and `distance` are read too; if a file has no
+  speed, it is derived from GPS positions (noisier, and reported).
 * Records without a GPS fix (e.g. indoor sections, tunnels) are skipped and counted as a warning.
 * Rider ids come from the file names (`R01.fit` → `R01`); duplicates get a `-2`, `-3`… suffix.
 * FIT timestamps are absolute UTC, so riders are synchronised by clock. Head-unit clocks are GPS-
@@ -65,12 +89,17 @@ course file is better: a rider's track carries that rider's GNSS error.
 * The FIT container is decoded by a small built-in reader (`backend/vector_pacing/fit.py`): normal and
   compressed-timestamp headers, developer fields, either byte order and chained files are supported,
   and the file checksum is verified. Corrupted or truncated files are rejected with a message.
-* Limits: 20 MB per file, 2–200 riders, 500 000 positions in total, 24 h per rider. Live tracking
-  integrations are not supported.
+* Limits: 20 MB per file, 1–200 riders (the GPS check needs at least 2), 500 000 positions in total,
+  24 h per rider. Live tracking integrations are not supported.
 
-Example: [`samples/drafting_two_riders/`](../samples/drafting_two_riders/) (`A.fit`, `B.fit`,
-`course.gpx`; no accuracy recorded). `samples/drafting_invalid.fit` is a truncated file. Regenerate
-both with `backend/scripts/generate_fit_samples.py`.
+Examples (regenerate with `backend/scripts/generate_fit_samples.py`):
+* [`samples/drafting_two_riders/`](../samples/drafting_two_riders/) (`A.fit`, `B.fit`, `course.gpx`):
+  positions only, no accuracy recorded.
+* [`samples/drafting_with_power/`](../samples/drafting_with_power/) (`R01.fit`, `R02.fit`,
+  `course.gpx`): 15 min with power, speed and cadence. R02 sits 5 m behind R01 for 90 s on ~100 W less
+  than its own solo power. Expected: one potential-drafting interval (E001) linked to one power anomaly
+  (P001). `R02.fit` alone shows the single-ride power screen.
+* `samples/drafting_invalid.fit`: a truncated file.
 
 API: `POST /api/drafting/analyze-fit` (multipart: repeated `files`, optional `course`, `settings` as a
 JSON string). Internally the files are converted to the `vector-pacing-riders/1` structure that the
@@ -144,8 +173,47 @@ The report for each interval includes:
   follower position) for 15 s either side
 * a list of data-quality limitations specific to that interval
 
+For `.fit` uploads each interval also lists `power_anomaly_ids`: power anomalies of the follower that
+overlap it in time.
+
 Exports (JSON and CSV) include all of this plus the settings, the illustrative-settings note,
-general limitations, per-rider data quality and the disclaimer.
+general limitations, per-rider data quality, the power screen and the disclaimer.
+
+## Power screen (within rider)
+
+Ported unchanged from RaceGuard's matched-section evidence model (`raceguard.analysis`; version
+`raceguard-matched-sections-1`). Drafting reduces the aerodynamic power a rider needs for a given
+speed. The screen compares each stable part of a ride with the **same rider's** riding elsewhere in
+that ride, so no generic CdA can create a flag by itself.
+
+1. **Frames.** A centred 7 s window smooths speed, power, grade and acceleration. Grade comes from
+   elevation over ≥ 20 m. Coasting, soft pedalling (below max(75 W, 35 % of the rider's median
+   power)), cadence below 30 rpm, ±4 s around pedalling transitions, speeds below 8 m/s and recording
+   gaps (> 5 s) are excluded. Travel direction is used only when GPS movement is coherent (no
+   turnarounds or stationary wander).
+2. **Sections.** Stable 10 s sections, sampled every 5 s so an event between fixed boundaries is not
+   diluted. Within a section, speed may vary by ≤ 1.5 m/s and grade by ≤ 2 %.
+3. **Comparison.** Each section is compared with the rider's sections 30 s – 30 min away that are
+   within 20° of direction, 0.75 % of grade and 0.2 m/s² of acceleration. Same-speed sections
+   (± 0.75 m/s) are preferred. Otherwise sections within 3.5 m/s are speed-normalised with a v³
+   aerodynamic adjustment, and the thresholds rise. The rolling, climbing and acceleration terms use
+   75 kg + 8 kg, Crr 0.004 and 97 % drivetrain efficiency.
+4. **Flag.** The median reference must exceed measured power by ≥ 45 W **and** 15 % (60 W and 20 %
+   when speed-normalised), and by 2.5 × a robust spread of the references. The deficit may not exceed
+   70 % of the aerodynamic share of the reference. At least 2 reference sections are needed.
+5. **Anomalies.** Flagged frames are joined (gaps ≤ 5 s). Anything shorter than 15 s is dropped. The
+   **review priority** is 0.55 + 0.14 × duration score (duration / 45 s) + 0.15 × power score (relative
+   deficit / 0.35), capped at 0.95. It is a heuristic ranking, **not a probability**.
+
+Each anomaly reports the rider, time, duration, average speed, measured vs. reference power, the
+number of comparable sections, whether speed normalisation was needed, the mean position and the
+linked GPS interval(s). Riders without power are listed as skipped.
+
+**What the power screen can't tell apart:** tailwind or gusts, a change of riding position or
+equipment, road surface, and power-meter error all look like drafting. A ride with no repeated
+comparable conditions (short, hilly or constantly changing) gives no anomalies and says so. The
+thresholds come from RaceGuard and have not yet been validated against labelled solo and drafting
+rides.
 
 ## Bundled scenario
 
@@ -176,5 +244,6 @@ turnaround exemption:
   riders side by side can't be told from riders in line.
 * The model knows nothing of road layout, obstacles, crashes, marshal instructions, motorbikes or
   vehicles, or other context a commissaire would consider.
-* The aerodynamic benefit of following is not estimated.
+* The GPS check does not estimate the aerodynamic benefit of following. The power screen looks for a
+  power deficit, but cannot separate drafting from wind (see above).
 * Thresholds are configurable and the defaults are illustrative. Results depend on them.
