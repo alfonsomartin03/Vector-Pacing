@@ -1,13 +1,22 @@
 # Vector Pacing
 
-**Cycling pacing simulator and optimizer — v1.0.0 (demonstration release).**
+**Cycling pacing simulator and optimizer, with a potential-drafting check — v1.0.0 (demonstration release).**
 
-Load a course, describe the rider, simulate a constant-power ride, let the optimizer propose a
-variable-power plan, compare the two, and export the result.
+Two independent tools in one local app:
 
-> **Model estimates only.** Results come from a simplified steady-state physics model and a CP/W′
-> balance approximation with the parameters you enter. They are not validated predictions and are
-> not medical or training advice. See [docs/MODEL.md](docs/MODEL.md).
+* **Pacing simulator.** Load a course and describe the rider. Simulate a constant-power ride, let the
+  optimizer propose a variable-power plan, compare the two, and export the result.
+* **Drafting check.** Load timestamped multi-rider positions from an event where drafting is
+  restricted (e.g. an ITT). Review intervals of *potential* drafting on a timeline and course view,
+  adjust the event rules, and export the findings.
+
+> **Model estimates only.** Pacing results come from a simplified steady-state physics model and a
+> CP/W′ balance approximation with the parameters you enter. They are not validated predictions and
+> are not medical or training advice. See [docs/MODEL.md](docs/MODEL.md).
+>
+> **Potential drafting only.** Drafting intervals are prompts for human review based on GNSS
+> estimates and configurable, illustrative settings. They are not confirmed rules violations, and no
+> penalty is implied. See [docs/DRAFTING.md](docs/DRAFTING.md).
 
 ## What v1.0 does
 
@@ -30,6 +39,19 @@ variable-power plan, compare the two, and export the result.
   layout supports keyboard use and narrow screens.
 * **Export.** Full JSON with inputs, units, versions, summaries, segments and per-step series, plus
   a per-step CSV that compares the two plans.
+* **Drafting check** (separate from pacing):
+  * **Data.** A bundled deterministic 12-rider ITT scenario, or upload of the documented
+    `vector-pacing-riders/1` JSON format.
+  * **Detection.** Sustained following within a configurable zone. Lateral separation is used when
+    the position accuracy supports it.
+  * **What it tells apart.** Following is distinguished from overtakes, drop-backs, brief
+    encounters, opposite-direction riders, side-by-side riders and nearby separate course sections.
+  * **Data quality.** Missing samples, misaligned timestamps, GNSS uncertainty and insufficient
+    accuracy are accounted for. Low-quality intervals are "inconclusive", not flagged.
+  * **Rules.** Zone length, passing time, drop-back time and exempt sections are configurable.
+    Presets are illustrative only.
+  * **Review and export.** A timeline, a course view and per-interval gap charts with limitations.
+    JSON/CSV export includes the settings and data-quality limitations.
 
 ## Quick start
 
@@ -46,7 +68,8 @@ Single-process demo (builds the UI, then serves UI + API):
 make serve
 ```
 
-Open <http://127.0.0.1:8000> and click **Try demo course**, then **Optimize pacing**.
+Open <http://127.0.0.1:8000> and click **Try demo course**, then **Optimize pacing**. For the
+drafting check, open the **Drafting check** tab and click **Try multi-rider demo**.
 
 Development mode (API with reload on :8000, Vite dev server on :5173):
 
@@ -75,16 +98,18 @@ This runs ruff, mypy, pytest, eslint, tsc, vitest and the production build, the 
 
 ```
 backend/vector_pacing/   course.py · physics.py · athlete.py · simulate.py · optimize.py · api.py
-backend/vector_pacing/data/demo_course.gpx   bundled demo (regenerate: backend/scripts/generate_demo_course.py)
-backend/tests/           pytest: parsing edge cases, physics, W′, simulation rules, optimizer, API
-frontend/src/            React app, API client, validation, export, charts; vitest tests in src/test
-samples/                 GPX files for upload testing (incl. a deliberately malformed one)
-docs/                    MODEL.md · ARCHITECTURE.md · DEMO.md · RELEASE_CHECKLIST.md
+                         drafting.py · drafting_api.py  (potential-drafting check, independent of pacing)
+backend/vector_pacing/data/   demo_course.gpx · drafting_demo.json  (regenerate with backend/scripts/*.py)
+backend/tests/           pytest: parsing, physics, W′, simulation, optimizer, drafting rules, API
+frontend/src/            React app; drafting UI in src/drafting; vitest tests in src/test
+samples/                 GPX and rider-position files for upload testing (incl. deliberately invalid ones)
+docs/                    MODEL.md · DRAFTING.md · ARCHITECTURE.md · DEMO.md · RELEASE_CHECKLIST.md
 ```
 
 ## Documentation
 
 * [Model assumptions and limitations](docs/MODEL.md)
+* [Drafting check: method, import format, settings, limitations](docs/DRAFTING.md)
 * [Architecture](docs/ARCHITECTURE.md)
 * [Demo script](docs/DEMO.md)
 * [Release notes](RELEASE_NOTES.md)
@@ -92,10 +117,21 @@ docs/                    MODEL.md · ARCHITECTURE.md · DEMO.md · RELEASE_CHECK
 
 ## Known limitations
 
-No wind, drafting, acceleration or inertia. Air density and CP are constant. W′ recovery is a simple
-approximation. The optimizer is local and works on segments, so it does not guarantee a global
-optimum. Estimates come without uncertainty bounds. Details are in
-[docs/MODEL.md §7](docs/MODEL.md#7-known-limitations).
+**Pacing:**
+* No wind, drafting benefit, acceleration or inertia.
+* Air density and CP are constant, and W′ recovery is a simple approximation.
+* The optimizer is local and works on segments, so it does not guarantee a global optimum.
+* Estimates come without uncertainty bounds.
+
+Details are in [docs/MODEL.md §7](docs/MODEL.md#7-known-limitations).
+
+**Drafting check:**
+* It relies on GNSS positions and the course line.
+* With typical consumer accuracy it cannot tell riders side by side from riders in line.
+* It knows nothing about road context.
+* It does not ship any official rule set.
+
+Details are in [docs/DRAFTING.md](docs/DRAFTING.md#limitations).
 
 ## Deferred ideas (not part of v1.0)
 
@@ -106,7 +142,10 @@ this release:
 * Time-series database storage (PostgreSQL/TimescaleDB)
 * Heart rate, cadence and other sensor channels, and Bluetooth/ANT+, Garmin or smart-trainer integration
 * Real-time pacing recommendations during a ride
-* Wind/weather, drafting, multi-rider and team time-trial simulation
+* Wind/weather, aerodynamic drafting benefit, pack dynamics, tactical multi-rider optimization and
+  team time-trial simulation (the drafting *check* only detects potential drafting; it does not model
+  its effect)
+* Live rider tracking integrations and named governing-body rule presets
 * Monte Carlo uncertainty, machine-learning fatigue models, automatic CdA estimation
 * Maps, cloud deployment, Docker and accounts
 

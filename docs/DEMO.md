@@ -1,4 +1,4 @@
-# Demo script (≈3 minutes)
+# Demo script (≈5 minutes)
 
 Prerequisite: `make install` once, then `make serve` and open <http://127.0.0.1:8000>.
 
@@ -23,3 +23,34 @@ Prerequisite: `make install` once, then `make serve` and open <http://127.0.0.1:
    Then try `samples/invalid_malformed.gpx` to show the error + "Choose another file".
 8. **Export.** Click **Export JSON (full)** and **Export CSV (per step)**. Both include parameters,
    units, app version 1.0.0 and model `vp-model-1.0`.
+
+## Drafting check (≈2 minutes)
+
+9. **Open the tab.** Click **Drafting check**, then **Try multi-rider demo**. Point out the
+   "Illustrative settings" notice and the illustrative turnaround exemption (3950–4085 m). Expected
+   counts:
+   * Potential drafting **1**
+   * Inconclusive **4**
+   * Overtake 2, Drop-back 2, Brief encounter 1, Exempt 2
+10. **Inspect the flag.** E001 (R02 behind R01) is selected:
+    * about 159 s, median gap ~7 m, ±3 m, 78 % probability inside the zone, quality "good"
+    * the gap chart stays under the dashed 10 m zone edge with its ±1σ band
+    * limitations list the exempt seconds and that lateral data could not be used
+11. **Distinctions.** Inspect an inconclusive R08 → R07 interval: ±13 m uncertainty, order uncertain,
+    explicitly *not* a flag. Tick **Show non-flagged intervals** to see:
+    * R04 passing R03 within 20 s (overtake + drop-back)
+    * R06's brief encounter
+
+    Open **Proximity not treated as following** to see:
+    * opposite-direction crossings with R09, who rides back
+    * the R11/R12 side-by-side pair
+    * outbound/return riders on separate course sections
+12. **Adjust rules.** Choose the preset **Illustrative — long zone (15 m / 30 s)**. Results go stale
+    and export is disabled. Click **Re-run analysis**: inconclusive drops to 3, and R02 → R01 is still
+    the only flag.
+13. **Upload.** Choose `samples/drafting_two_riders.json`. No accuracy is reported, so the 5 m
+    assumption applies, and the result is **inconclusive**, not a flag. Open *Data-quality settings*,
+    set *Assumed accuracy* to 1 m and re-run: now 1 potential drafting. Then upload
+    `samples/drafting_invalid.json` to show the validation error.
+14. **Export.** Click **Export JSON (full)** and **Export CSV (intervals)**. Both include the
+    settings, the illustrative note, per-interval limitations and the disclaimer.

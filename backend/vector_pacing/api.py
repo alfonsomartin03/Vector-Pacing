@@ -29,6 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import MODEL_VERSION, __version__
 from .course import MAX_GPX_BYTES, Course, CourseError, load_demo_course, parse_gpx
+from .drafting import ScenarioError
+from .drafting_api import router as drafting_router
 from .optimize import (
     MAX_EVALUATIONS,
     MAX_WALL_TIME_S,
@@ -219,6 +221,12 @@ def _meta(req: RunRequest, settings: OptimizerSettings) -> dict[str, Any]:
 # ---------------------------------------------------------------- app
 
 app = FastAPI(title="Vector Pacing API", version=__version__)
+app.include_router(drafting_router)
+
+
+@app.exception_handler(ScenarioError)
+async def _scenario_error(_: Request, exc: ScenarioError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": str(exc), "kind": "scenario_error"})
 
 
 @app.exception_handler(CourseError)

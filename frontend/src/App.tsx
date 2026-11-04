@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, fetchDemoCourse, optimize, parseCourseFile, simulate } from './api';
 import { Charts } from './components/Charts';
+import { DraftingView } from './drafting/DraftingView';
 import { ParamsForm } from './components/ParamsForm';
 import { SegmentsTable, SolverDetails, Summary } from './components/Results';
 import { buildCsvExport, buildJsonExport, downloadText, exportBaseName } from './export';
@@ -25,6 +26,12 @@ const errorMessage = (e: unknown) => (e instanceof ApiError || e instanceof Erro
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
 
 export default function App() {
+  const [tab, setTabState] = useState<'pacing' | 'drafting'>('pacing');
+  const [draftingOpened, setDraftingOpened] = useState(false); // mount lazily, then keep state across tab switches
+  const setTab = (t: 'pacing' | 'drafting') => {
+    setTabState(t);
+    if (t === 'drafting') setDraftingOpened(true);
+  };
   const [course, setCourse] = useState<Course | null>(null);
   const [courseStatus, setCourseStatus] = useState<CourseStatus>({ loading: false });
   const [form, setForm] = useState<FormState>(defaultForm);
@@ -146,14 +153,48 @@ export default function App() {
           <h1>Vector Pacing</h1>
           <p className="tagline">Cycling pacing simulator · constant vs optimized power · model estimates only</p>
         </div>
-        {course && (
+        {course && tab === 'pacing' && (
           <button type="button" className="btn btn-quiet" onClick={startOver}>
             Start over
           </button>
         )}
       </header>
 
+      <nav className="tabs" role="tablist" aria-label="Tools">
+        {(
+          [
+            ['pacing', 'Pacing simulator'],
+            ['drafting', 'Drafting check'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`tab-${id}`}
+            aria-selected={tab === id}
+            aria-controls={`panel-${id}`}
+            tabIndex={tab === id ? 0 : -1}
+            className={`tab${tab === id ? ' is-active' : ''}`}
+            onClick={() => setTab(id)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                const next = tab === 'pacing' ? 'drafting' : 'pacing';
+                setTab(next);
+                document.getElementById(`tab-${next}`)?.focus();
+              }
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
       <main id="main">
+        <div id="panel-drafting" role="tabpanel" aria-labelledby="tab-drafting" hidden={tab !== 'drafting'}>
+          {draftingOpened && <DraftingView />}
+        </div>
+        <div id="panel-pacing" role="tabpanel" aria-labelledby="tab-pacing" hidden={tab !== 'pacing'}>
         <section className="panel course-panel" aria-labelledby="course-h">
           <h2 id="course-h">1. Course</h2>
           <div className="course-actions">
@@ -346,13 +387,15 @@ export default function App() {
             </section>
           </div>
         )}
+        </div>
       </main>
 
       <footer className="footer">
         <p>
           <strong>Model estimates, not predictions.</strong> Vector Pacing uses a simplified steady-state physics model and
           a CP/W′ balance approximation with the parameters you enter. Results are not validated against real rides and
-          are not medical or training advice.
+          are not medical or training advice. The drafting check reports <em>potential</em> drafting for human review only;
+          it does not confirm rules violations or apply penalties.
         </p>
       </footer>
     </div>

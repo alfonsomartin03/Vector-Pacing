@@ -7,8 +7,8 @@ copied without `.venv`, `node_modules`, `dist` or caches, then `make install && 
 | --- | --- | --- | --- |
 | 1 | Fresh install from documented commands | ✅ | Fresh copy: `make install` exit 0 |
 | 2 | Backend lint / format / types | ✅ | `ruff check`, `ruff format --check`, `mypy --strict`: clean |
-| 3 | Backend tests | ✅ | `pytest`: 76 passed |
-| 4 | Frontend lint / types / tests | ✅ | `eslint`, `tsc --noEmit`: clean; `vitest`: 17 passed |
+| 3 | Backend tests | ✅ | `pytest`: 120 passed (76 pacing/API + 44 drafting) |
+| 4 | Frontend lint / types / tests | ✅ | `eslint`, `tsc --noEmit`: clean; `vitest`: 28 passed |
 | 5 | Production build | ✅ | `vite build` succeeds |
 | 6 | Single-process serve | ✅ | Fresh copy: `/api/health` ok, `/` serves the built UI |
 | 7 | Demo works offline, no credentials | ✅ | Demo GPX is bundled; no runtime network calls |
@@ -27,5 +27,23 @@ copied without `.venv`, `node_modules`, `dist` or caches, then `make install && 
 | 20 | Screen-reader pass | ⚠️ unverified | Semantics/labels in place; no assistive-technology testing performed |
 | 21 | Windows / Linux hosts | ⚠️ unverified locally | CI targets Ubuntu; Windows not tested (`make` assumed) |
 | 22 | Docs: setup, architecture, model, limitations, demo, release notes | ✅ | README, docs/, RELEASE_NOTES.md |
+
+## Drafting check
+
+| # | Item | Status | Evidence |
+| --- | --- | --- | --- |
+| D1 | Bundled multi-rider demo runs offline | ✅ | Browser + fresh copy API: 1 potential (R02→R01), 4 inconclusive, 2 overtake, 2 drop-back, 1 brief, 2 exempt; 26 separate-section, 3 opposite-direction, 1 lateral encounters |
+| D2 | Documented import format | ✅ | docs/DRAFTING.md; row + columnar, `t`/ISO, optional accuracy; tests for 13 invalid-document cases |
+| D3 | Following vs. pass / brief / opposite / separate section / side by side / stationary | ✅ | `tests/test_drafting.py` dedicated tests + demo assertions |
+| D4 | Rule boundaries | ✅ | Allowed-duration boundary inclusive (≤ allowance not flagged), zone-length boundary, slow pass and slow drop-back flagged |
+| D5 | Data quality: dropouts, misaligned timestamps, poor accuracy, near-threshold | ✅ | Tests: bridged vs. split dropouts, +0.5 s offset interpolated, 10 m accuracy → inconclusive, 9.5 m gap ±2.5 m → inconclusive |
+| D6 | Configurable rules, illustrative labelling | ✅ | Presets labelled "Illustrative … Not taken from any governing body"; no governing-body presets bundled (rules not verifiable here) |
+| D7 | Timeline + course view + gap data inspection | ✅ | Browser 1440×900: timeline bars (keyboard Enter selects), course map with zoom, gap chart with ±1σ and zone edge |
+| D8 | Adjust settings → stale → re-run | ✅ | Browser: long-zone preset → stale banner, export disabled; re-run → 1 potential, 3 inconclusive |
+| D9 | Upload + invalid upload | ✅ | Browser: generated 2-rider JSON → 1 potential; 1-rider doc → clear 422 message; non-JSON rejected (vitest) |
+| D10 | Export with settings + limitations | ✅ | Browser blob capture: JSON has settings, settings_note, disclaimer, per-event limitations + 206-point gap series; CSV header carries settings & disclaimer |
+| D11 | Mobile layout | ✅ | 375×812: no page overflow; timeline scrolls inside its frame |
+| D12 | Separation from pacing | ✅ | `drafting.py` imports no pacing modules; separate router and UI tab |
+| D13 | Real-world event data | ⚠️ unverified | Only synthetic scenarios tested; behaviour on real GNSS traces (multipath, urban canyons) is unknown |
 
 Not done by design: no push, tag, GitHub release or deployment (requires owner authorization).
